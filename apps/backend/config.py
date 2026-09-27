@@ -54,6 +54,34 @@ class Settings(BaseSettings):
     G14_CV_MAX_PCT: float = 30.0
     G14_NMBE_MAX_PCT: float = 10.0
 
+    # --- Phase 3A: machine health (all thresholds configurable, no magic numbers) ---
+    # Native statistical health model id stored with each fit/score row.
+    HEALTH_MODEL_ID: str = "statistical-v1"
+    # Minimum fitted reference intervals required before scoring (else
+    # INSUFFICIENT_HISTORY); per state-bucket minimum rows for the bucket
+    # reference (else OUT_OF_DOMAIN for intervals in that bucket).
+    HEALTH_MIN_REF_INTERVALS: int = 24
+    HEALTH_MIN_BUCKET_ROWS: int = 3
+    # Robust-z thresholds mapping max signal |z| -> WARNING / CRITICAL.
+    # WARNING sits at 4: hourly means blend adjacent states (e.g. an
+    # idle-dominant hour containing 20 min of holding), and those blends
+    # reach z ~ 3.5 on NORMAL data; true degradation (+5 mm/s, +40 C)
+    # scores z 8+.
+    HEALTH_WARN_Z: float = 4.0
+    HEALTH_CRIT_Z: float = 6.0
+    # Relative MAD floor per signal (fraction of |median|): avoids huge z
+    # from near-flat reference windows and desensitises load-confounded
+    # current (a healthy +25 % load uplift scores z ~ 1.7, silent).
+    # Absolute epsilon guards median ~ 0.
+    HEALTH_MAD_FLOOR_FRAC: float = 0.10
+    HEALTH_MAD_EPSILON: float = 1e-6
+
+    # --- Phase 3B: PBL RUL adapter (external C-MAPSS model, optional) ---
+    # Local paths to your own PBL artifact; not distributed with JouleMitra.
+    # Empty (default) -> the adapter reports UNAVAILABLE, never an error.
+    PBL_ONNX_PATH: str = ""
+    PBL_SENSOR_VOCAB_PATH: str = ""
+
 
 _settings: Settings | None = None
 

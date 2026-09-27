@@ -33,6 +33,7 @@ def client(_test_db):
         eng = dbmod.get_engine()
         with eng.begin() as conn:
             for tbl in ("telemetry", "production_record", "machine_state", "audit_event",
-                        "anomaly_event", "energy_baseline"):
+                        "anomaly_event", "energy_baseline",
+                        "machine_health", "machine_health_reference"):
                 conn.execute(text(f"TRUNCATE {tbl}"))
         yield c

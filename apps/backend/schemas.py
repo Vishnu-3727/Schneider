@@ -116,3 +116,33 @@ class DetectRequest(BaseModel):
     _tz_start = field_validator("start")(_require_tz_aware)
     _tz_end = field_validator("end")(_require_tz_aware)
     _order = field_validator("end")(_require_end_after_start)
+
+
+class HealthFitRequest(BaseModel):
+    """Fit a machine-health reference on NORMAL history (per machine)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    machine_id: str | None = Field(default=None, description="Fit one machine; omit for all")
+    model_id: str | None = Field(default=None, description="Health model id; omit for default")
+    start: datetime = Field(description="Timezone-aware reference-window start (NORMAL history)")
+    end: datetime = Field(description="Timezone-aware reference-window end")
+
+    _tz_start = field_validator("start")(_require_tz_aware)
+    _tz_end = field_validator("end")(_require_tz_aware)
+    _order = field_validator("end")(_require_end_after_start)
+
+
+class HealthScoreRequest(BaseModel):
+    """Score (and persist, idempotently) machine-health intervals."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: datetime = Field(description="Timezone-aware scoring-window start")
+    end: datetime = Field(description="Timezone-aware scoring-window end")
+    machine_id: str | None = Field(default=None, description="Score one machine; omit for all")
+    model_id: str | None = Field(default=None, description="Health model id; omit for default")
+
+    _tz_start = field_validator("start")(_require_tz_aware)
+    _tz_end = field_validator("end")(_require_tz_aware)
+    _order = field_validator("end")(_require_end_after_start)

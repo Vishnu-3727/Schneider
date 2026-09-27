@@ -1,4 +1,4 @@
-# JouleMitra — ML Models (Phase 2: expected-energy baseline)
+# JouleMitra — ML Models (Phase 2: expected-energy baseline; Phase 3: machine health)
 
 All numbers below are MEASURED on SIMULATED data (prototype, requires plant
 validation). Nothing here transfers to real plant performance. Model code:
@@ -81,8 +81,10 @@ fitted coefficients as equipment nameplate data.
   they detect large sustained shifts (≥ warn threshold over N intervals),
   not duty-cycle subtleties.
 - LIMITATION — compressor has no air-demand/throughput driver (state is
-  always running): the baseline detects a level shift but cannot tell
-  legitimate demand growth from waste. A flow/demand input is future work.
+  always running). Without air-demand/flow information, an energy increase
+  cannot reliably be distinguished between legitimate demand growth and
+  waste. Future compressor diagnosis inputs: power + pressure + air
+  flow/demand + runtime + machine health.
 - R² is not meaningful when the target variance is near zero (pump): the
   near-constant load makes the R² denominator ~0, so R² goes negative while
   CV(RMSE) stays well within acceptance. Quote CV(RMSE)/NMBE + the G14
@@ -96,3 +98,101 @@ fitted coefficients as equipment nameplate data.
   catches sustained shifts.
 - Anomaly ≠ failure. Wording is always "above expected baseline for the
   production achieved".
+
+## 4. Health model card: statistical-v1 (Phase 3, native)
+
+- **Purpose.** Answer "is this machine behaving unlike its own NORMAL
+  self?" per fixed 1 h interval, as a diagnostic clue next to energy
+  analytics — never a failure prediction.
+- **Inputs (per machine, per interval).** Interval means of
+  `vibration_mm_s`, `temperature_c`, `current_a` plus the dominant
+  `machine_state` (exact-state conditioning: melting vs holding vs idle vs
+  running each get their own reference bucket). Missing signals stay None
+  (never zero-filled); incomplete intervals score UNAVAILABLE.
+- **Outputs.** `health_score` 0–100 (`100·exp(−(a/crit)²)`),
+  `anomaly_score` (max signal |robust z|), `state` NORMAL/WARNING/CRITICAL,
+  `status` OK/UNAVAILABLE/INSUFFICIENT_HISTORY/OUT_OF_DOMAIN/ERROR, plus
+  per-signal contributions (`explain`: signal, value, median, z,
+  pct_change, weight summing to 1.0). Code:
+  `services/machine_health/statistical.py`. Training harness:
+  `POST /machine-health/fit`; scoring: `POST /machine-health/score`.
+  History: `machine_health_reference` / `machine_health` tables
+  (`source=DERIVED`).
+- **Reference data.** NORMAL-operation telemetry of the SAME machine being
+  scored (per-machine fit, no cross-machine transfer); complete intervals
+  only. Minimum `HEALTH_MIN_REF_INTERVALS` (24) fitted intervals and
+  `HEALTH_MIN_BUCKET_ROWS` (3) rows per state bucket, else
+  INSUFFICIENT_HISTORY / OUT_OF_DOMAIN — never a forced verdict.
+- **Thresholds (all env config).** Modified robust z
+  `0.6745·(x−median)/MAD` with a relative MAD floor
+  (`HEALTH_MAD_FLOOR_FRAC=0.10`, `HEALTH_MAD_EPSILON=1e-6`); WARNING at
+  `HEALTH_WARN_Z=4.0`, CRITICAL at `HEALTH_CRIT_Z=6.0`.
+- **Validation.** Scenario acceptance on SIMULATED data
+  (`tests/integration/test_health_scenarios.py`, 5-row table — NORMAL
+  silent on seeds 1–3; IDLE_WASTE → ENERGY_ONLY; EQUIPMENT_DEGRADATION
+  with `energy_penalty=0` → HEALTH_ONLY via vibration/temperature;
+  with `energy_penalty=0.35` → COINCIDENT; HIGH_LOAD with omitted health
+  signals → ENERGY_ONLY_HEALTH_UNAVAILABLE). Latest numbers: see
+  docs/VALIDATION.md (Phase 3 section).
+- **Limitations.**
+  - Hourly means only: sub-hour transients are smoothed away; gradual drift
+    below WARNING lowers the score but never raises the state.
+  - Current is load-dependent: a healthy load uplift moves current and the
+    MAD floor keeps it silent (z ~ 1.7), but a HIGH_LOAD fault raises
+    current draw enough that the per-signal reference legitimately flags
+    it — so HIGH_LOAD shows COINCIDENT (correlation, never causation), and
+    the energy-only acceptance uses IDLE_WASTE instead (see
+    docs/ASSUMPTIONS.md A19).
+  - A health-only fault (simulator `energy_penalty=0`) leaves voltage,
+    current and power at NORMAL; detection rests on vibration/temperature
+    (see docs/ASSUMPTIONS.md A18).
+  - Rare/unseen state buckets score OUT_OF_DOMAIN; correlation text never
+    claims causation (banned: cause/caused/because/due to/results from).
+
+## 5. Health model card: pbl-rul (Phase 3B, external reference adapter)
+
+- **Purpose.** Reuse-external-work reference ONLY: expose what an
+  outside turbofan RUL model can and (mostly) cannot say about JouleMitra
+  machines. It never scores factory machines and is not a production
+  predictor. Code: `services/machine_health/pbl_adapter.py`
+  (`PBLRulAdapter(MachineHealthModel)`); listed by
+  `GET /machine-health/models` next to `statistical-v1`.
+- **Inputs.** C-MAPSS turbofan sensor channels ONLY (in-domain
+  `score_window(...)`: an (L=30, S) normalised window + sensor-vocabulary
+  ids + domain id, implementing the learned ONNX contract — inputs
+  `x` (batch, sensors, 30) float32, `mask` bool, `sensor_ids` int64,
+  `domain_id` int64; outputs `rul` (batch, 1), `attn`
+  (batch, 4, 1, sensors)). JouleMitra signals (vibration_mm_s /
+  temperature_c / current_a) are OUT_OF_DOMAIN for this model.
+- **Outputs.** For factory machines (furnace/compressor/pump):
+  `status=OUT_OF_DOMAIN`, reason "trained on turbofan sensor channels;
+  not validated for \<type\>; retraining on plant data required", and NO
+  health score or RUL — by construction, whether or not the artifact
+  loads. `score_window()` returns an RUL + attention for a
+  caller-supplied in-domain window (demonstration/tests only).
+- **Reference data.** NASA C-MAPSS turbofan run-to-failure
+  (EXTERNAL_REFERENCE). Training domain is recorded as such in
+  `metadata()` and shown on the dashboard PBL card.
+- **Thresholds.** None — the adapter has no decision thresholds; the only
+  knobs are the local artifact paths (`PBL_ONNX_PATH`,
+  `PBL_SENSOR_VOCAB_PATH`, both empty by default). Empty path, missing
+  file, or missing onnxruntime (optional `[pbl]` extra, never a core
+  dependency) → status UNAVAILABLE with a clear reason, never a crash.
+- **Validation (EXTERNAL_REFERENCE, verified from the external project's
+  files).** Test RMSE 14.51 (`results/metrics.json` official-test entry)
+  vs random-forest baseline RMSE 14.41 (`results/baseline_rf.json`
+  official-test entry): not better than the RF baseline on this
+  benchmark; not a production-grade predictor. An optional integration
+  test (`tests/integration/test_pbl_models.py`) loads a local artifact
+  (path via `PBL_TEST_ONNX_PATH` env var only) and checks output
+  shape/finiteness on a synthetic in-domain window, skipping with an
+  explicit reason when the file or onnxruntime is absent.
+- **Limitations.**
+  - OUT_OF_DOMAIN for all JouleMitra factory machines; scoring factory
+    machines always uses `statistical-v1`.
+  - Without air-demand/flow information, an energy increase cannot
+    reliably be distinguished between legitimate demand growth and waste.
+    Future compressor diagnosis inputs: power + pressure + air
+    flow/demand + runtime + machine health.
+  - The artifact is local-only (not distributed with JouleMitra;
+    ownership/licence unresolved — see `.env.example`).

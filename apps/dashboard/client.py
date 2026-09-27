@@ -71,3 +71,25 @@ def get_anomalies(status: str | None = None) -> dict:
 
 def acknowledge_anomaly(event_id: str) -> dict:
     return _post(f"/energy/anomalies/{event_id}/acknowledge", {})
+
+
+def get_machine_health(machine_id: str | None = None, start_iso: str | None = None,
+                       end_iso: str | None = None, model_id: str | None = None) -> dict:
+    params: dict = {}
+    if machine_id:
+        params["machine_id"] = machine_id
+    if start_iso:
+        params["start"] = start_iso
+    if end_iso:
+        params["end"] = end_iso
+    if model_id:
+        params["model_id"] = model_id
+    return _get("/machine-health", params or None)
+
+
+def get_health_models() -> dict:
+    return _get("/machine-health/models")
+
+
+def get_insights(start_iso: str, end_iso: str) -> dict:
+    return _get("/insights", {"start": start_iso, "end": end_iso})

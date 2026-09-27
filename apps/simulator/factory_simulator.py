@@ -3,15 +3,18 @@
 Class names make simulation explicit: SimulatedFactory, SimulatedScenario.
 Phase 2 implements IDLE_WASTE, HIGH_LOAD and PRODUCTION_SURGE as in-run
 overrides of the machine-model knobs (parameterised by start offset,
-duration and magnitude); EQUIPMENT_DEGRADATION, TARIFF_SHIFT and
-COMBINED_ANOMALY still raise NotImplementedError (Phase 3+).
+duration and magnitude); Phase 3A adds EQUIPMENT_DEGRADATION (gradual
+vibration/temperature rise with an optional extra-mechanical-load power
+AND current uplift at nominal voltage) plus an omit_health_signals
+option. TARIFF_SHIFT and COMBINED_ANOMALY still raise NotImplementedError
+(Phase 4+).
 
 Scenario effects are applied BEFORE energy integration: the factory only
 sets public override knobs on the machine model (power_scale, idle_scale,
-force_state, force_loaded) and then calls model.step() exactly once, so
-the cumulative counter stays consistent and no physics lives in the
-factory. Ground-truth scenario windows are exposed via scenario_windows()
-for tests only — never stored as telemetry.
+force_state, force_loaded, health_ramp, power_ramp) and then calls
+model.step() exactly once, so the cumulative counter stays consistent and
+no physics lives in the factory. Ground-truth scenario windows are
+exposed via scenario_windows() for tests only — never stored as telemetry.
 """
 
 from __future__ import annotations
@@ -37,7 +40,7 @@ class Scenario(str, Enum):
     COMBINED_ANOMALY = "COMBINED_ANOMALY"
 
 
-PHASE3_SCENARIOS = {Scenario.EQUIPMENT_DEGRADATION, Scenario.TARIFF_SHIFT, Scenario.COMBINED_ANOMALY}
+PHASE3_SCENARIOS = {Scenario.TARIFF_SHIFT, Scenario.COMBINED_ANOMALY}
 
 #: Default power uplift for HIGH_LOAD (fraction). Kept below the ingest spike
 #: multiple (1.5x) so scenario rows stay GOOD quality.
@@ -49,12 +52,23 @@ DEFAULT_HIGH_LOAD_MAGNITUDE = 0.25
 #: production and the extra time-based (holding/heating) losses.
 DEFAULT_SURGE_MAGNITUDE = 0.30
 
-#: Machine types each Phase-2 scenario overrides; other types run NORMAL
+#: Default EQUIPMENT_DEGRADATION health magnitude (health_ramp reaches this
+#: at the end of the window: +5 mm/s vibration, +40 C at unchanged voltage,
+#: current and PF) and extra-mechanical-load power uplift fraction
+#: (power_ramp reaches this at the end of the window, same useful output;
+#: power AND current rise at nominal voltage). energy_penalty = 0 ->
+#: HEALTH-ONLY anomaly (energy normal); > 0 -> power/energy rise too
+#: (combined).
+DEFAULT_DEGRADATION_MAGNITUDE = 1.0
+DEFAULT_ENERGY_PENALTY = 0.0
+
+#: Machine types each scenario overrides; other types run NORMAL
 #: (pump doubles as an unaffected control in every scenario run).
 SCENARIO_SCOPE = {
     Scenario.IDLE_WASTE: ("furnace", "compressor"),
     Scenario.HIGH_LOAD: ("furnace", "compressor"),
     Scenario.PRODUCTION_SURGE: ("furnace",),
+    Scenario.EQUIPMENT_DEGRADATION: ("furnace", "compressor"),
 }
 
 
@@ -89,13 +103,19 @@ class SimulatedFactory:
         scenario_start_h: float = 0.0,
         scenario_duration_h: float | None = None,
         magnitude: float | None = None,
+        energy_penalty: float | None = None,
+        omit_health_signals: bool = False,
     ) -> None:
         self.scenario = Scenario(scenario)
         if self.scenario in PHASE3_SCENARIOS:
             raise NotImplementedError(
-                f"Scenario {self.scenario.value} is Phase 3+ work; implemented: "
-                "NORMAL, IDLE_WASTE, HIGH_LOAD, PRODUCTION_SURGE."
+                f"Scenario {self.scenario.value} is Phase 4+ work; implemented: "
+                "NORMAL, IDLE_WASTE, HIGH_LOAD, PRODUCTION_SURGE, EQUIPMENT_DEGRADATION."
             )
+        if magnitude is not None and magnitude < 0:
+            raise ValueError("magnitude must be >= 0")
+        if energy_penalty is not None and energy_penalty < 0:
+            raise ValueError("energy_penalty must be >= 0")
         self.machines = machines
         self.hours = hours
         self.step_s = step_s
@@ -105,8 +125,15 @@ class SimulatedFactory:
         self.steps = int(hours * 3600 / step_s)
         self.scenario_start_h = scenario_start_h
         self.scenario_duration_h = scenario_duration_h if scenario_duration_h is not None else hours
-        # None -> per-scenario default (HIGH_LOAD 0.25, SURGE 0.30, IDLE_WASTE 0.0).
+        # None -> per-scenario default (HIGH_LOAD 0.25, SURGE 0.30, IDLE_WASTE 0.0,
+        # EQUIPMENT_DEGRADATION magnitude 1.0, energy_penalty 0.0 = health-only).
         self.magnitude = magnitude
+        # Efficiency-loss uplift for EQUIPMENT_DEGRADATION only (fraction of
+        # power at the same useful output). 0 -> HEALTH-ONLY (energy normal).
+        self.energy_penalty = energy_penalty
+        # When True, vibration/temperature/current are emitted as null
+        # (emulates health data "unavailable"; energy path unaffected).
+        self.omit_health_signals = omit_health_signals
         self._last_start: datetime | None = None
 
     # -- scenario helpers -------------------------------------------------
@@ -153,6 +180,22 @@ class SimulatedFactory:
             mag = self.magnitude if self.magnitude is not None else DEFAULT_SURGE_MAGNITUDE
             if hasattr(model, "idle_scale"):
                 model.idle_scale = max(0.0, 1.0 - 2.6 * mag)
+        elif self.scenario == Scenario.EQUIPMENT_DEGRADATION:
+            # Gradual degradation: vibration/temperature rise linearly from
+            # the window start to magnitude at the window end; power AND
+            # current rise toward energy_penalty at the same useful output
+            # (extra mechanical load at nominal voltage, P = sqrt(3)*V*I*PF
+            # preserved). energy_penalty = 0 -> HEALTH-ONLY anomaly: the
+            # electrical operating point stays NORMAL, only vibration and
+            # temperature witness the fault.
+            mag = self.magnitude if self.magnitude is not None else DEFAULT_DEGRADATION_MAGNITUDE
+            pen = self.energy_penalty if self.energy_penalty is not None else DEFAULT_ENERGY_PENALTY
+            progress = (elapsed_h - self.scenario_start_h) / max(self.scenario_duration_h, 1e-9)
+            progress = min(1.0, max(0.0, progress))
+            if hasattr(model, "health_ramp"):
+                model.health_ramp = mag * progress
+            if hasattr(model, "power_ramp"):
+                model.power_ramp = pen * progress
         else:
             raise AssertionError(f"unhandled scenario {self.scenario}")  # pragma: no cover
         return model.step(index, dt_h), True
@@ -167,6 +210,10 @@ class SimulatedFactory:
             model.force_state = None
         if hasattr(model, "force_loaded"):
             model.force_loaded = None
+        if hasattr(model, "health_ramp"):
+            model.health_ramp = 0.0
+        if hasattr(model, "power_ramp"):
+            model.power_ramp = 0.0
 
     def run(self) -> tuple[list[dict], list[dict]]:
         rng = np.random.default_rng(self.seed)
@@ -191,18 +238,19 @@ class SimulatedFactory:
                 ts = start + timedelta(seconds=i * self.step_s)
                 elapsed_h = (i * self.step_s) / 3600.0
                 s, _ = self._scenario_step(model, spec, i, dt_h, elapsed_h)
+                omit = self.omit_health_signals
                 telemetry.append(
                     {
                         "machine_id": spec.machine_id,
                         "ts": ts.isoformat(),
                         "voltage_v": s.voltage_v,
-                        "current_a": s.current_a,
+                        "current_a": None if omit else s.current_a,
                         "power_kw": s.power_kw,
                         "reactive_power_kvar": s.reactive_power_kvar,
                         "power_factor": s.power_factor,
                         "energy_kwh": s.energy_kwh,
-                        "vibration_mm_s": s.vibration_mm_s,
-                        "temperature_c": s.temperature_c,
+                        "vibration_mm_s": None if omit else s.vibration_mm_s,
+                        "temperature_c": None if omit else s.temperature_c,
                         "rpm": s.rpm,
                         "runtime_h": s.runtime_h,
                         "machine_state": s.machine_state,

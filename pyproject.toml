@@ -25,6 +25,13 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.8",
 ]
+# Optional PBL adapter extra: ONNX Runtime for the external C-MAPSS RUL
+# model (services/machine_health/pbl_adapter.py). NOT a core dependency:
+# the adapter reports UNAVAILABLE when onnxruntime is not installed.
+pbl = [
+  "onnxruntime>=1.19",
+  "numpy==2.2.1",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

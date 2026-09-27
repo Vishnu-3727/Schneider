@@ -24,6 +24,10 @@ of re-implementing physics):
   melting physics).
 - furnace force_state: forces a state with zero production (IDLE_WASTE).
 - compressor force_loaded: True forces continuously loaded (IDLE_WASTE).
+- health_ramp / power_ramp (all models): gradual EQUIPMENT_DEGRADATION
+  effects applied in _finalize before energy integration (vibration /
+  temperature rise; optional extra-mechanical-load power AND current
+  uplift at nominal voltage for the same output).
 """
 
 from __future__ import annotations
@@ -70,6 +74,21 @@ class SimulatedMachine:
         self.runtime_h = 0.0
         # Scenario override knob: multiplies every power setpoint. NORMAL = 1.0.
         self.power_scale = 1.0
+        # Degradation knobs (EQUIPMENT_DEGRADATION, set per-step by the
+        # factory as ramp values; NORMAL = 0.0). health_ramp scales the
+        # vibration / temperature rise; power_ramp scales the efficiency-loss
+        # power uplift. Both applied in _finalize BEFORE energy integration.
+        self.health_ramp = 0.0
+        self.power_ramp = 0.0
+
+    # Degradation effect sizes (ASSUMPTION SIMULATED): vibration +5 mm/s and
+    # temperature +40 C at health_ramp 1.0. Voltage always stays at its
+    # NORMAL operating point (a supply-side sag is not equipment wear, so
+    # the simulator never injects one here); current rises only with power
+    # through power_ramp, at unchanged PF (power-factor rules stay silent
+    # because PF itself is untouched).
+    DEGRAD_VIB_MM_S = 5.0
+    DEGRAD_TEMP_C = 40.0
 
     def _finalize(
         self,
@@ -83,6 +102,16 @@ class SimulatedMachine:
         running: bool,
         prod_rate: float,
     ) -> SimStep:
+        # Degradation applied BEFORE energy integration. health_ramp = 0
+        # leaves the electrical operating point untouched (vibration and
+        # temperature rise only: a health-only fault keeps energy normal).
+        # power_ramp > 0 models extra mechanical load: power AND current
+        # rise at nominal voltage with PF held constant. Power consistency
+        # P = sqrt(3)*V*I*PF is preserved because current is derived from
+        # the degraded power, nominal voltage and unchanged PF below.
+        power_kw = power_kw * (1.0 + self.power_ramp)
+        vibration = vibration + self.DEGRAD_VIB_MM_S * self.health_ramp
+        temperature = temperature + self.DEGRAD_TEMP_C * self.health_ramp
         voltage_v = NOMINAL_VOLTAGE_V + self.rng.normal(0, 3.0)
         current_a, q_kvar = _electrical(power_kw, voltage_v, pf)
         self.energy_kwh += power_kw * dt_h

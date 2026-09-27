@@ -1,4 +1,4 @@
-# JouleMitra — Validation (Phase 2)
+# JouleMitra — Validation (Phases 2–3)
 
 Every number on this page comes from SIMULATED data (source class SIMULATED /
 DERIVED). It is a prototype result that requires plant validation and says
@@ -70,3 +70,39 @@ melting physics is linear. Expect a lower R² on real plant data.
   window-aggregate deviation within ±5 %.
 - IDLE_WASTE and HIGH_LOAD raise events that overlap the injected window.
 - Running detection again creates no duplicate events.
+
+## Phase 3 health + correlation verification (SIMULATED data)
+
+Verified 2026-09-27. `pytest`: 134 passed, 0 failed (about 151 s), including
+the optional PBL ONNX test, which was enabled with `PBL_TEST_ONNX_PATH`.
+Acceptance runs through the API against the real test database: the energy
+baseline and the `statistical-v1` health reference are fitted on NORMAL
+history, then the scenario window is scored.
+
+| Scenario | Energy | Health | Expected | Result |
+|---|---|---|---|---|
+| NORMAL (seeds 1, 2, 3) | normal | normal | 0 energy events, 0 health WARNING/CRITICAL, 0 insights | PASS |
+| IDLE_WASTE | abnormal | normal | ENERGY_ONLY insights only | PASS |
+| EQUIPMENT_DEGRADATION, energy_penalty = 0 | normal | abnormal | HEALTH_ONLY, 0 energy events | PASS |
+| EQUIPMENT_DEGRADATION, energy_penalty > 0 | abnormal | abnormal | COINCIDENT, both evidences, correlation wording | PASS |
+| HIGH_LOAD with health signals omitted | abnormal | missing | Energy events still detected; ENERGY_ONLY_HEALTH_UNAVAILABLE; energy endpoints 200 | PASS |
+| Health model raises an exception | — | error | /energy/summary, /energy/anomalies/detect and /dashboard/summary return 200; /machine-health reports ERROR with no traceback | PASS |
+
+Notes:
+
+- The energy-only case uses IDLE_WASTE, not HIGH_LOAD. HIGH_LOAD raises motor
+  current, which the per-signal health reference flags, so HIGH_LOAD reports
+  COINCIDENT. Current depends on load, so a COINCIDENT insight is a
+  correlation for a human to inspect, not a health diagnosis.
+- Every insight text is scanned for causal wording (cause, caused, because,
+  due to, results from) by a unit test.
+- `pbl-rul` (the PBL adapter) reports OUT_OF_DOMAIN for every factory machine
+  and never emits a score for them. Its cited benchmark, test RMSE 14.51 vs
+  RF baseline 14.41 (EXTERNAL_REFERENCE, from unify-rul `results/metrics.json`
+  and `results/baseline_rf.json`), shows it is not better than the baseline.
+  The artifact is loaded from a local path at runtime and is not distributed
+  with JouleMitra.
+- Live Docker check: the stack is healthy, the dashboard returns HTTP 200,
+  and `/machine-health/models` lists `statistical-v1` and `pbl-rul`. In the
+  container no artifact path is configured, so `pbl-rul` shows
+  available = false.

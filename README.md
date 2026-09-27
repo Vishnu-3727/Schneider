@@ -1,12 +1,27 @@
-# JouleMitra — Phase 2 (baseline → SEC → anomaly → alerts)
+# JouleMitra — Phase 3 (machine health → correlation → PBL adapter)
 
 Authoritative spec: `docs/spec/MASTER_SPEC.md`. Phase 1 committed (de875e9);
 Phase 2 scope: `docs/IMPLEMENTATION_PLAN.md` Phase 2 section. Simulator
-constants: `docs/ASSUMPTIONS.md`. Baseline model card: `docs/ML_MODELS.md`
-(furnace: `good_production_kg` + heating/holding/idle hours, NNLS;
-NMBE% + ASHRAE G14 acceptance; R² info-only).
+constants: `docs/ASSUMPTIONS.md`. Model cards: `docs/ML_MODELS.md`
+(baseline v1-linear; health `statistical-v1`; external `pbl-rul` adapter).
 Scenarios: `docs/SIMULATION.md`. Latest verification numbers:
-see docs/VALIDATION.md. Do not begin Phase 3.
+see docs/VALIDATION.md (Phase 2 table; Phase 3 section to be filled by
+manager from live run). Do not begin Phase 4.
+
+Phase 3 status: health interface (`MachineHealthModel` + registry),
+native `statistical-v1` (per-machine, state-conditioned median + MAD
+reference; `POST /machine-health/fit|/score`, `GET /machine-health`,
+`GET /machine-health/models`), energy + health correlation
+(`GET /insights`: ENERGY_ONLY / HEALTH_ONLY / COINCIDENT /
+ENERGY_ONLY_HEALTH_UNAVAILABLE, causation language banned), PBL adapter
+(`pbl-rul`: UNAVAILABLE without a local artifact, always OUT_OF_DOMAIN
+for factory machines — scoring them always uses `statistical-v1`),
+dashboard Equipment + Insights views (API-only; state as text + symbol),
+and the B1 physics fix (health-only degradation keeps voltage/current/
+power NORMAL; `energy_penalty > 0` raises power AND current at nominal
+voltage). 118 pre-existing tests preserved; PBL adds unit + integration
+tests including an optional ONNX test (runs when `PBL_TEST_ONNX_PATH`
+points at a local artifact and the `[pbl]` extra is installed).
 
 ## Prerequisites
 

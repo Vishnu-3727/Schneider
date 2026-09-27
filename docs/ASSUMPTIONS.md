@@ -1,4 +1,4 @@
-# JouleMitra — Assumptions (Phases 1–2)
+# JouleMitra — Assumptions (Phases 1–3A)
 
 Every entry: ASSUMPTION / WHY / IMPACT. All simulator numeric constants are
 labelled SIMULATED/ASSUMPTION and every simulator record carries
@@ -173,3 +173,47 @@ labelled SIMULATED/ASSUMPTION and every simulator record carries
   extras).
 - IMPACT: Shorter real batch rhythms need a lower N; longer legitimate holds
   need a higher one -- env config, no code change.
+
+## A18 — EQUIPMENT_DEGRADATION simulator parameters (SIMULATED)
+- ASSUMPTION: `magnitude` (default 1.0) scales the health-signal rise
+  (vibration +5 mm/s, temperature +40 C at magnitude 1.0, ramping linearly
+  from the window start) and `energy_penalty` (default 0.0) scales the
+  extra-mechanical-load power uplift at unchanged output (fraction, same
+  ramp). `energy_penalty = 0` is a HEALTH-ONLY anomaly: vibration and
+  temperature rise while voltage, current and power stay at their NORMAL
+  operating points (a voltage sag is a supply-side condition, not equipment
+  wear, so the simulator never injects one — the pre-B1 sag model was
+  removed for exactly this reason). `energy_penalty > 0` raises power AND
+  current at nominal voltage and unchanged PF, so `P = sqrt(3)·V·I·PF`
+  holds exactly and no power-factor energy rule fires on either fault type.
+  `omit_health_signals=true` emits vibration/temperature/current as null
+  (energy path unaffected).
+- WHY: A degrading machine runs hotter and vibrates more; only a fault that
+  also adds mechanical load draws more current for the same work.
+  Separating the health ramp from the energy penalty lets one scenario
+  cover health-only, combined, and unavailable-data cases without
+  misleading later analytics with a supply-side artefact.
+- IMPACT: Effect sizes are calibrated so a full-window fault scores
+  WARNING/CRITICAL while NORMAL history stays NORMAL; plant data needs
+  recalibration (thresholds are env config, no code change).
+
+## A19 — Native statistical health model and thresholds
+- ASSUMPTION: `statistical-v1` learns per-machine, per-exact-machine_state
+  median + MAD references for vibration/temperature/current over hourly
+  means; anomaly = max signal |robust z| with a 10 % MAD floor
+  (`HEALTH_MAD_FLOOR_FRAC`); states at `HEALTH_WARN_Z=4.0` /
+  `HEALTH_CRIT_Z=6.0`; health score `100·exp(-(a/crit)²)`.
+- WHY: Exact-state conditioning (melting vs holding vs idle) keeps NORMAL
+  state changes from flagging, but hourly means still blend adjacent states
+  (an idle-dominant hour can contain 20 min of holding, reaching z ~ 3.5 on
+  NORMAL data), so WARNING sits at 4 while true degradation scores z 8+.
+  The floor desensitises load-confounded current (a healthy +25 % load
+  uplift scores z ~ 1.7, silent); vibration/temperature are the primary
+  degradation witnesses. Thin/unseen state buckets score OUT_OF_DOMAIN,
+  never a forced verdict.
+- IMPACT: The energy-only acceptance uses IDLE_WASTE rather than HIGH_LOAD:
+  forced holding/loaded are NORMAL operating points (health silent), while
+  HIGH_LOAD raises current draw, which a per-signal reference legitimately
+  notices. Correlation text never claims causation (banned: cause/caused/
+  because/due to/results from); the single sanctioned disclaimer is
+  "This is a correlation, not an established cause".
