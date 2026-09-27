@@ -57,8 +57,34 @@ def test_all_records_simulated_source():
 
 
 def test_non_normal_scenario_raises():
-    with pytest.raises(NotImplementedError, match="Phase 2"):
-        SimulatedFactory(DEFAULT_MACHINES, scenario="IDLE_WASTE")
-    with pytest.raises(NotImplementedError, match="Phase 2"):
+    # Phase 2: IDLE_WASTE/HIGH_LOAD/PRODUCTION_SURGE are implemented in the
+    # factory; only Phase-3+ scenarios still raise NotImplementedError.
+    with pytest.raises(NotImplementedError, match="Phase 3"):
+        SimulatedFactory(DEFAULT_MACHINES, scenario="EQUIPMENT_DEGRADATION")
+    with pytest.raises(NotImplementedError, match="Phase 3"):
+        apply_fault([], Scenario.TARIFF_SHIFT)
+    with pytest.raises(NotImplementedError, match="SimulatedFactory"):
         apply_fault([], Scenario.HIGH_LOAD)
     assert apply_fault([{"a": 1}], Scenario.NORMAL) == [{"a": 1}]
+
+
+def test_phase2_scenarios_run_and_stay_monotonic():
+    import math
+
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    end = datetime(2026, 9, 27, 12, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+    for sc in ("IDLE_WASTE", "HIGH_LOAD", "PRODUCTION_SURGE"):
+        f = SimulatedFactory(DEFAULT_MACHINES, scenario=sc, hours=48, step_s=60,
+                             seed=1, end=end, scenario_start_h=24, scenario_duration_h=24)
+        tel, prod = f.run()
+        assert f.scenario_windows()  # ground truth for tests only
+        by_machine: dict[str, list[dict]] = {}
+        for p in tel:
+            by_machine.setdefault(p["machine_id"], []).append(p)
+        for mid, rows in by_machine.items():
+            energies = [r["energy_kwh"] for r in rows]
+            assert all(b >= a for a, b in zip(energies, energies[1:])), (sc, mid)
+            for p in rows:
+                expected = math.sqrt(3) * p["voltage_v"] * p["current_a"] * p["power_factor"] / 1000.0
+                assert p["power_kw"] == pytest.approx(expected, rel=1e-3), (sc, mid)

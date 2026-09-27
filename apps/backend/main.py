@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from apps.backend.db import db_is_up
-from apps.backend.routers import dashboard, production, sites, telemetry
+from apps.backend.routers import dashboard, energy, production, sites, telemetry
 
 log = logging.getLogger("joulemitra")
 
@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(telemetry.router)
     app.include_router(production.router)
     app.include_router(dashboard.router)
+    app.include_router(energy.router)
     return app
 
 

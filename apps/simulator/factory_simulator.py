@@ -1,8 +1,17 @@
-"""Parameterised NORMAL-scenario factory engine (SIMULATED data).
+"""Parameterised factory engine (SIMULATED data).
 
 Class names make simulation explicit: SimulatedFactory, SimulatedScenario.
-Only NORMAL is implemented in Phase 1; other Scenario members raise
-NotImplementedError with a Phase 2+ message.
+Phase 2 implements IDLE_WASTE, HIGH_LOAD and PRODUCTION_SURGE as in-run
+overrides of the machine-model knobs (parameterised by start offset,
+duration and magnitude); EQUIPMENT_DEGRADATION, TARIFF_SHIFT and
+COMBINED_ANOMALY still raise NotImplementedError (Phase 3+).
+
+Scenario effects are applied BEFORE energy integration: the factory only
+sets public override knobs on the machine model (power_scale, idle_scale,
+force_state, force_loaded) and then calls model.step() exactly once, so
+the cumulative counter stays consistent and no physics lives in the
+factory. Ground-truth scenario windows are exposed via scenario_windows()
+for tests only — never stored as telemetry.
 """
 
 from __future__ import annotations
@@ -26,6 +35,27 @@ class Scenario(str, Enum):
     PRODUCTION_SURGE = "PRODUCTION_SURGE"
     TARIFF_SHIFT = "TARIFF_SHIFT"
     COMBINED_ANOMALY = "COMBINED_ANOMALY"
+
+
+PHASE3_SCENARIOS = {Scenario.EQUIPMENT_DEGRADATION, Scenario.TARIFF_SHIFT, Scenario.COMBINED_ANOMALY}
+
+#: Default power uplift for HIGH_LOAD (fraction). Kept below the ingest spike
+#: multiple (1.5x) so scenario rows stay GOOD quality.
+DEFAULT_HIGH_LOAD_MAGNITUDE = 0.25
+
+#: Default production uplift for PRODUCTION_SURGE (fraction). The surge is
+#: MORE HEATS PER DAY (shorter idle gaps via the furnace idle_scale knob)
+#: with the same per-kg melting physics: energy rises through both the extra
+#: production and the extra time-based (holding/heating) losses.
+DEFAULT_SURGE_MAGNITUDE = 0.30
+
+#: Machine types each Phase-2 scenario overrides; other types run NORMAL
+#: (pump doubles as an unaffected control in every scenario run).
+SCENARIO_SCOPE = {
+    Scenario.IDLE_WASTE: ("furnace", "compressor"),
+    Scenario.HIGH_LOAD: ("furnace", "compressor"),
+    Scenario.PRODUCTION_SURGE: ("furnace",),
+}
 
 
 @dataclass
@@ -56,11 +86,15 @@ class SimulatedFactory:
         seed: int = 1,
         tz: str = "Asia/Kolkata",
         end: datetime | None = None,
+        scenario_start_h: float = 0.0,
+        scenario_duration_h: float | None = None,
+        magnitude: float | None = None,
     ) -> None:
         self.scenario = Scenario(scenario)
-        if self.scenario != Scenario.NORMAL:
+        if self.scenario in PHASE3_SCENARIOS:
             raise NotImplementedError(
-                f"Scenario {self.scenario.value} is Phase 2+ work; only NORMAL is implemented in Phase 1."
+                f"Scenario {self.scenario.value} is Phase 3+ work; implemented: "
+                "NORMAL, IDLE_WASTE, HIGH_LOAD, PRODUCTION_SURGE."
             )
         self.machines = machines
         self.hours = hours
@@ -69,19 +103,94 @@ class SimulatedFactory:
         self.tz = ZoneInfo(tz)
         self.end = end or datetime.now(self.tz)
         self.steps = int(hours * 3600 / step_s)
+        self.scenario_start_h = scenario_start_h
+        self.scenario_duration_h = scenario_duration_h if scenario_duration_h is not None else hours
+        # None -> per-scenario default (HIGH_LOAD 0.25, SURGE 0.30, IDLE_WASTE 0.0).
+        self.magnitude = magnitude
+        self._last_start: datetime | None = None
+
+    # -- scenario helpers -------------------------------------------------
+    def _in_window(self, elapsed_h: float) -> bool:
+        return self.scenario_start_h <= elapsed_h < self.scenario_start_h + self.scenario_duration_h
+
+    def scenario_windows(self) -> dict[str, tuple[str, str]]:
+        """Ground-truth injected windows {machine_id: (start_iso, end_iso)} for tests only."""
+        if self.scenario == Scenario.NORMAL or self._last_start is None:
+            return {}
+        ws = self._last_start + timedelta(hours=self.scenario_start_h)
+        we = ws + timedelta(hours=self.scenario_duration_h)
+        scope = SCENARIO_SCOPE.get(self.scenario, ())
+        return {
+            spec.machine_id: (ws.isoformat(), we.isoformat())
+            for spec in self.machines
+            if spec.machine_type in scope
+        }
+
+    def _scenario_step(self, model, spec: MachineSpec, index: int, dt_h: float, elapsed_h: float):
+        """Set public model knobs, then take exactly one model.step()."""
+        self._reset_knobs(model)
+        if (
+            self.scenario == Scenario.NORMAL
+            or not self._in_window(elapsed_h)
+            or spec.machine_type not in SCENARIO_SCOPE.get(self.scenario, ())
+        ):
+            return model.step(index, dt_h), False
+        if self.scenario == Scenario.IDLE_WASTE:
+            # Powered holding / continuously loaded against no demand
+            # (ASSUMPTION SIMULATED); production stays zero via the model.
+            if spec.machine_type == "furnace" and hasattr(model, "force_state"):
+                model.force_state = "holding"
+            elif hasattr(model, "force_loaded"):
+                model.force_loaded = True
+        elif self.scenario == Scenario.HIGH_LOAD:
+            # Same useful output, every power setpoint raised (ASSUMPTION SIMULATED).
+            mag = self.magnitude if self.magnitude is not None else DEFAULT_HIGH_LOAD_MAGNITUDE
+            model.power_scale = 1.0 + mag
+        elif self.scenario == Scenario.PRODUCTION_SURGE:
+            # Natural surge: more heats per day (shorter idle gaps), same
+            # per-kg melting physics (ASSUMPTION SIMULATED). idle_scale maps
+            # the requested production uplift (calibrated: 0.30 -> ~+30 %).
+            mag = self.magnitude if self.magnitude is not None else DEFAULT_SURGE_MAGNITUDE
+            if hasattr(model, "idle_scale"):
+                model.idle_scale = max(0.0, 1.0 - 2.6 * mag)
+        else:
+            raise AssertionError(f"unhandled scenario {self.scenario}")  # pragma: no cover
+        return model.step(index, dt_h), True
+
+    @staticmethod
+    def _reset_knobs(model) -> None:
+        """Restore NORMAL knobs (idempotent; every model carries power_scale)."""
+        model.power_scale = 1.0
+        if hasattr(model, "idle_scale"):
+            model.idle_scale = 1.0
+        if hasattr(model, "force_state"):
+            model.force_state = None
+        if hasattr(model, "force_loaded"):
+            model.force_loaded = None
 
     def run(self) -> tuple[list[dict], list[dict]]:
         rng = np.random.default_rng(self.seed)
         start = self.end - timedelta(hours=self.hours)
+        self._last_start = start
         dt_h = self.step_s / 3600.0
         telemetry: list[dict] = []
         # per-machine, per-hour production accumulation
         prod_acc: dict[tuple[str, int], dict] = {}
         for spec in self.machines:
             model = make_machine(spec.machine_id, spec.machine_type, spec.rated_power_kw, rng)
+            if hasattr(model, "day_phase_h"):
+                # Anchor the compressor demand profile to wall-clock time.
+                model.day_phase_h = start.hour + start.minute / 60.0 + start.second / 3600.0
             for i in range(self.steps):
-                ts = start + timedelta(seconds=(i + 1) * self.step_s)
-                s = model.step(i, dt_h)
+                # First-row alignment: ts = start + i*step, so telemetry
+                # buckets hold 12 rows spanning 55 min (coverage ~92 %) and
+                # the production hour index derived from i matches the
+                # telemetry bucket exactly (same step set -> production,
+                # state shares and energy all cover the same steps; only the
+                # cumulative-counter delta inherently spans one step less).
+                ts = start + timedelta(seconds=i * self.step_s)
+                elapsed_h = (i * self.step_s) / 3600.0
+                s, _ = self._scenario_step(model, spec, i, dt_h, elapsed_h)
                 telemetry.append(
                     {
                         "machine_id": spec.machine_id,

@@ -51,6 +51,7 @@ def post_telemetry(
 
     now = now_utc()
     accepted = suspect = bad = duplicate = 0
+    last_seen: dict[str, object] = {}
     for r in records:
         m = r.machine_id
         if r.ts in seen[m]:
@@ -110,15 +111,21 @@ def post_telemetry(
             if r.energy_kwh is not None:
                 last_energy[m] = r.energy_kwh if last_energy[m] is None else max(last_energy[m], r.energy_kwh)
         if r.machine_state is not None:
-            close_and_open_state(db, open_states.get(m), m, r.machine_state.value, r.ts, r.source.value)
-            open_states.update(fetch_open_states(db, [m]))
-        touch_sensors(db, m, r.ts)
+            # Track the open state row locally (no re-query per row).
+            open_states[m] = close_and_open_state(
+                db, open_states.get(m), m, r.machine_state.value, r.ts, r.source.value)
+        prev = last_seen.get(m)
+        if prev is None or r.ts > prev:
+            last_seen[m] = r.ts
         if verdict.quality == "GOOD":
             accepted += 1
         elif verdict.quality == "SUSPECT":
             suspect += 1
         else:
             bad += 1
+
+    for m, ts in last_seen.items():
+        touch_sensors(db, m, ts)
 
     audit(db, "ingest", "telemetry", "batch",
           {"accepted": accepted, "suspect": suspect, "bad": bad, "duplicate": duplicate})

@@ -85,3 +85,34 @@ class IngestResult(BaseModel):
     suspect: int
     bad: int
     duplicate: int
+
+
+def _require_end_after_start(v: datetime, info) -> datetime:
+    start = (info.data or {}).get("start")
+    if start is not None and v <= start:
+        raise ValueError("end must be after start")
+    return v
+
+
+class BaselineFitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    machine_id: str | None = Field(default=None, description="Fit one machine; omit for all")
+    start: datetime = Field(description="Timezone-aware reference-window start (NORMAL history)")
+    end: datetime = Field(description="Timezone-aware reference-window end")
+
+    _tz_start = field_validator("start")(_require_tz_aware)
+    _tz_end = field_validator("end")(_require_tz_aware)
+    _order = field_validator("end")(_require_end_after_start)
+
+
+class DetectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: datetime = Field(description="Timezone-aware scoring-window start")
+    end: datetime = Field(description="Timezone-aware scoring-window end")
+    machine_id: str | None = Field(default=None, description="Score one machine; omit for all")
+
+    _tz_start = field_validator("start")(_require_tz_aware)
+    _tz_end = field_validator("end")(_require_tz_aware)
+    _order = field_validator("end")(_require_end_after_start)

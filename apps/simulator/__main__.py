@@ -1,4 +1,9 @@
-"""CLI: python -m apps.simulator --scenario NORMAL --hours 24 --step-s 60 --seed 1 [--post | --csv out.csv]"""
+"""CLI: python -m apps.simulator --scenario NORMAL --hours 24 --step-s 60 --seed 1 [--post | --csv out.csv]
+
+Phase 2: --normal-days N generates N NORMAL days followed by a --hours
+scenario window, e.g. --normal-days 7 --scenario IDLE_WASTE --hours 24 --post.
+--magnitude sets the HIGH_LOAD power uplift fraction (default 0.25) or the
+PRODUCTION_SURGE production uplift fraction (default 0.30)."""
 
 from __future__ import annotations
 
@@ -9,6 +14,8 @@ import httpx
 
 from apps.backend.config import get_settings
 from apps.simulator.factory_simulator import (
+    DEFAULT_HIGH_LOAD_MAGNITUDE,
+    DEFAULT_SURGE_MAGNITUDE,  # noqa: F401 (surfaced in --help)
     DEFAULT_MACHINES,
     MachineSpec,
     Scenario,
@@ -36,6 +43,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--post", action="store_true", help="POST packets to the API")
     ap.add_argument("--csv", default=None, help="Write telemetry CSV (production goes to *_production.csv)")
+    ap.add_argument("--normal-days", type=float, default=0.0,
+                    help="NORMAL history days prepended before the scenario window")
+    ap.add_argument("--magnitude", type=float, default=None,
+                    help=f"HIGH_LOAD power uplift (default {DEFAULT_HIGH_LOAD_MAGNITUDE}) "
+                         f"or PRODUCTION_SURGE production uplift (default {DEFAULT_SURGE_MAGNITUDE})")
+    ap.add_argument("--end", default=None,
+                    help="Run end as ISO timestamp (default: now). Fixes windows for verify runs.")
     args = ap.parse_args(argv)
 
     try:
@@ -56,10 +70,21 @@ def main(argv: list[str] | None = None) -> int:
 
     from apps.simulator.factory_simulator import post_to_api, write_csv
 
-    factory = SimulatedFactory(specs, scenario=scenario, hours=args.hours,
-                               step_s=args.step_s, seed=args.seed, tz=settings.TZ)
+    end = None
+    if args.end:
+        from datetime import datetime as _dt
+
+        end = _dt.fromisoformat(args.end)
+    normal_h = float(args.normal_days) * 24.0
+    factory = SimulatedFactory(specs, scenario=scenario, hours=normal_h + args.hours,
+                               step_s=args.step_s, seed=args.seed, tz=settings.TZ,
+                               end=end,
+                               scenario_start_h=normal_h, scenario_duration_h=args.hours,
+                               magnitude=args.magnitude)
     telemetry, production = factory.run()
     print(f"scenario={scenario.value} seed={args.seed} telemetry={len(telemetry)} production={len(production)}")
+    for mid, (ws, we) in factory.scenario_windows().items():
+        print(f"ground-truth window {mid}: {ws} .. {we} (tests only, never stored)")
 
     if args.csv:
         tpath, ppath = write_csv(telemetry, production, args.csv)

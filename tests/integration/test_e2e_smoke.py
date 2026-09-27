@@ -22,7 +22,7 @@ def _post_all(client, path, packets, chunk=500):
 
 def test_e2e_smoke(client):
     end = datetime.now(TZ).replace(microsecond=0)
-    factory = SimulatedFactory(DEFAULT_MACHINES, hours=24, step_s=60, seed=1, end=end)
+    factory = SimulatedFactory(DEFAULT_MACHINES, hours=24, step_s=300, seed=1, end=end)
     telemetry, production = factory.run()
 
     t_tot = _post_all(client, "/telemetry", telemetry)

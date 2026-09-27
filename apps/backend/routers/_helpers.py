@@ -49,21 +49,27 @@ def fetch_open_states(session: Session, ids: list[str]) -> dict[str, dict]:
     return {r[0]: {"id": r[1], "state": r[2]} for r in rows}
 
 
-def close_and_open_state(session: Session, open_row: dict | None, machine_id: str, new_state: str, ts, source: str) -> None:
+def close_and_open_state(session: Session, open_row: dict | None, machine_id: str, new_state: str, ts, source: str) -> dict:
+    """Close the open state row (if the state changed) and open the new one.
+
+    Returns the current open row ({id, state}) so callers can track it
+    without re-querying.
+    """
     if open_row is not None and open_row["state"] == new_state:
-        return
+        return open_row
     if open_row is not None:
         session.execute(
             text("UPDATE machine_state SET ts_end = :ts WHERE id = :id"),
             {"ts": ts, "id": open_row["id"]},
         )
-    session.execute(
+    row = session.execute(
         text(
             "INSERT INTO machine_state (machine_id, state, ts_start, ts_end, source) "
-            "VALUES (:m, :s, :ts, NULL, :src)"
+            "VALUES (:m, :s, :ts, NULL, :src) RETURNING id"
         ),
         {"m": machine_id, "s": new_state, "ts": ts, "src": source},
-    )
+    ).fetchone()
+    return {"id": row[0], "state": new_state}
 
 
 def touch_sensors(session: Session, machine_id: str, ts) -> None:
