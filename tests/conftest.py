@@ -35,6 +35,7 @@ def client(_test_db):
             for tbl in ("telemetry", "production_record", "machine_state", "audit_event",
                         "anomaly_event", "energy_baseline",
                         "machine_health", "machine_health_reference",
-                        "optimization_run", "recommendation"):
-                conn.execute(text(f"TRUNCATE {tbl}"))
+                        "optimization_run", "recommendation",
+                        "intervention", "verification_result"):
+                conn.execute(text(f"TRUNCATE {tbl} CASCADE"))
         yield c

@@ -204,12 +204,51 @@ class RecommendationGenerateRequest(BaseModel):
 class RecommendationAcknowledgeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decision: str = Field(description="ACCEPTED or REJECTED")
+    decision: str = Field(description="APPROVED or REJECTED (ACCEPTED is an alias of APPROVED)")
     note: str = Field(default="", description="Reviewer note")
 
     @field_validator("decision")
     @classmethod
     def _decision(cls, v: str) -> str:
-        if v not in ("ACCEPTED", "REJECTED"):
-            raise ValueError("decision must be ACCEPTED or REJECTED")
+        if v == "ACCEPTED":
+            return "APPROVED"
+        if v not in ("APPROVED", "REJECTED"):
+            raise ValueError("decision must be APPROVED or REJECTED")
         return v
+
+
+class InterventionType(str, Enum):
+    REDUCE_IDLE = "REDUCE_IDLE"
+    RESCHEDULE = "RESCHEDULE"
+    REPAIR = "REPAIR"
+
+
+class InterventionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recommendation_id: str
+    type: InterventionType
+    parameters: dict = Field(default_factory=dict, description="What was changed (free-form)")
+    applied_at: datetime = Field(description="Timezone-aware time the change took effect")
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    baseline_start: datetime | None = Field(
+        default=None, description="Pre-intervention window start (default: VERIFY_BASELINE_DAYS before)")
+    baseline_end: datetime | None = Field(default=None, description="Default: applied_at")
+
+    _tz_applied = field_validator("applied_at")(_require_tz_aware)
+
+    @field_validator("baseline_start", "baseline_end")
+    @classmethod
+    def _tz_optional(cls, v: datetime | None) -> datetime | None:
+        return None if v is None else _require_tz_aware(v)
+
+
+class InterventionVerifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: datetime = Field(description="Timezone-aware measurement-window start (>= applied_at)")
+    end: datetime = Field(description="Timezone-aware measurement-window end")
+
+    _tz_start = field_validator("start")(_require_tz_aware)
+    _tz_end = field_validator("end")(_require_tz_aware)
+    _order = field_validator("end")(_require_end_after_start)

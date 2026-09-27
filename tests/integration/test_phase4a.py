@@ -52,7 +52,7 @@ def p4a(_test_db):
                         "audit_event", "anomaly_event", "energy_baseline",
                         "machine_health", "machine_health_reference",
                         "optimization_run", "recommendation"):
-                conn.execute(text(f"TRUNCATE {tbl}"))
+                conn.execute(text(f"TRUNCATE {tbl} CASCADE"))
         f = SimulatedFactory(DEFAULT_MACHINES, scenario="TARIFF_SHIFT",
                              hours=N_NORMAL_H + SCEN_H, step_s=STEP_S, seed=7,
                              end=END, scenario_start_h=N_NORMAL_H,

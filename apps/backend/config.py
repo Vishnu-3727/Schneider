@@ -125,6 +125,19 @@ class Settings(BaseSettings):
     # When current vs recommended production differs by more than this,
     # schedules are NOT COMPARABLE and projected deltas are suppressed.
     OPT_COMPARABLE_PROD_TOL: float = 0.01
+    # Phase 5 savings verification (services/verification/verify.py).
+    # Confidence for the ASHRAE G14 savings uncertainty; minimum usable
+    # hourly points and completeness on each side; production comparability
+    # tolerance (% change of mean hourly good production) and the allowed
+    # share of measurement hours beyond the baseline production range.
+    VERIFY_CONFIDENCE: float = 0.90
+    VERIFY_MIN_BASELINE_POINTS: int = 72
+    VERIFY_MIN_POST_POINTS: int = 24
+    VERIFY_MIN_COMPLETE_FRAC: float = 0.90
+    VERIFY_PROD_TOL_PCT: float = 15.0
+    VERIFY_MAX_EXTRAPOLATED_FRAC: float = 0.05
+    # Default baseline window length before applied_at when none is given.
+    VERIFY_BASELINE_DAYS: float = 7.0
 
 
 _settings: Settings | None = None

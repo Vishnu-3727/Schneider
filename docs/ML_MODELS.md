@@ -298,3 +298,44 @@ fitted coefficients as equipment nameplate data.
 - **Wording.** Projected/estimated only; fact-stating savings language is
   banned and scanned by a unit test. Cost figures are illustrative
   estimates requiring plant validation.
+
+## 8. Savings verification card (Phase 5, counterfactual)
+
+- **Purpose:** decide whether an applied intervention actually reduced
+  energy, and by how much, with a stated uncertainty. It never assumes a
+  saving.
+- **Method:** avoided-energy regression (IPMVP Option C style, ISO 50015).
+  OLS fitted on the pre-intervention baseline window:
+  `E_h = b0 + b1·P_(h-1) + b2·P_h + b3·P_(h+1)`, with hourly good
+  production P. The counterfactual is this model driven by the measurement
+  period's production. Saving = counterfactual - actual.
+- **Driver rule:** only exogenous drivers. Machine-state hours are excluded
+  because the intervention changes them (REDUCE_IDLE turns holding into
+  idle). A unit test shows a state-hour model erases a real saving that the
+  production-only model recovers.
+- **Uncertainty:** ASHRAE Guideline 14 fractional savings uncertainty at
+  VERIFY_CONFIDENCE (90 %), with n' corrected for lag-1 residual
+  autocorrelation.
+- **Outcomes:** SUCCESS (VERIFIED), NO_EFFECT and WORSE (NOT_VERIFIED, with
+  WORSE stated explicitly), NOT_COMPARABLE and INSUFFICIENT_DATA. The last
+  two report no saving at all.
+- **Gates:** baseline must pass G14 (CV(RMSE) ≤ 30 %, |NMBE| ≤ 10 %);
+  ≥ 72 usable baseline hours and ≥ 24 measurement hours, each ≥ 90 %
+  complete; mean production within ±15 %; ≤ 5 % of measurement hours
+  beyond the baseline production range.
+- **Impact conversion:** VERIFIED only. Cost = Σ_h (cf_h - actual_h) × the
+  local-hour tariff rate; the illustrative tariff is labelled and never
+  presented as the factory's bill. CO2 = verified kWh × CEA grid factor
+  (CO2 only, never relabelled CO2e), with version, fiscal year, effective
+  period and source class. While the factor awaits confirmation against the
+  CEA table, the result is flagged `provisional` and labelled "Estimated CO2
+  impact - provisional emission-factor data; not for external accounting".
+  A date beyond the latest published factor uses the latest one, flagged
+  LATEST_AVAILABLE.
+- **Limitations:** production is the only modelled driver (ambient
+  conditions, product mix and shift calendar are not). Hourly granularity.
+  Uncertainty narrows only with longer measurement windows. All
+  demonstration data is SIMULATED; the CEA factor values need confirming
+  against the CEA table before external use.
+- **Inference:** backend, on request (`POST /interventions/{id}/verify`),
+  well under a second for 10 days of hourly data.

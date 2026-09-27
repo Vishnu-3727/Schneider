@@ -151,3 +151,44 @@ ASSUMPTIONS entries: A21 (optimiser simplifications), A22 (illustrative
 tariff), A23 (deterministic budget + wall-clock safety net), A24
 (recommendation rules, wording, human-in-the-loop), A25 (energy breakdown
 semantics).
+
+## Phase 5 intervention verification (SIMULATED data)
+
+Verified 2026-09-27. `pytest`: 238 passed, 1 skipped (the optional PBL
+ONNX test), about 318 s. Live run through the Docker stack
+(`POST /interventions` then `POST /interventions/{id}/verify`): furnace-01
+with chronic powered holding for 60 % of every idle gap, 7-day baseline,
+3-day measurement window, seed 1. Every number is from SIMULATED
+telemetry. Cost uses the ILLUSTRATIVE tariff (ASSUMPTION). CO2 uses the CEA
+v21.0 factor 0.710 kgCO2/kWh (EXTERNAL_REFERENCE, applied as
+LATEST_AVAILABLE to 2026 energy, to be confirmed against the CEA table).
+
+CO2 figures are **estimates based on provisional emission-factor data, not for external accounting**. They are CO2 only (CEA factors exclude other GHGs) and are never relabelled CO2e. The 291 kg figure must not be presented as an authoritative real-world emissions reduction until the factor has been confirmed against the CEA table.
+
+| Case (simulated cause) | Outcome | Counterfactual kWh | Actual kWh | Saving kWh | ± U (90 %) | Cost / CO2 |
+|---|---|---:|---:|---:|---:|---|
+| REDUCE_IDLE, effectiveness 1.0, rebound 0.15 | SUCCESS → VERIFIED | 5941.5 | 5531.5 | 410.1 (6.9 %) | 157.2 | INR 3015 (illustrative tariff) / estimated 291.1 kg CO2, provisional factor |
+| effectiveness 0.5, compliance 0.6 | NO_EFFECT → NOT_VERIFIED | 5858.6 | 5752.4 | 106.2 | 155.0 | not applicable |
+| effectiveness 1.0, rebound 1.0 (reheat outweighs) | WORSE → NOT_VERIFIED | 5853.6 | 6698.6 | −845.0 (energy increased) | 154.9 | not applicable |
+| production +53 % after the change | NOT_COMPARABLE | — | — | — | — | not applicable |
+| 20 h telemetry outage in measurement | INSUFFICIENT_DATA (69 % complete) | — | — | — | — | not applicable |
+
+- The baseline fit passed G14 (hourly CV(RMSE) about 10.6 %).
+- Each case moved APPROVED → APPLIED → MEASURED → outcome, with an audit
+  row per move.
+- Re-posting the same idempotency key, or re-verifying, returned the
+  stored result: no duplicate intervention, saving, cost or CO2.
+- The partial fix is a real improvement, but it is smaller than what 3 days
+  of data can prove, so it is correctly NOT_VERIFIED. A longer measurement
+  window would narrow the uncertainty.
+- Automated coverage (`tests/unit/test_verification.py`,
+  `tests/unit/test_impact.py`, `tests/integration/test_interventions.py`):
+  - SUCCESS and NO_EFFECT on seeds 1 and 2, REPAIR success, WORSE,
+    NOT_COMPARABLE, INSUFFICIENT_DATA.
+  - Idempotency, and illegal transitions (409).
+  - Tariff periods, boundaries, local time, a missing or incomplete tariff,
+    the illustrative label.
+  - Factor units, provenance, version and effective-date selection, a
+    missing factor.
+  - Only a VERIFIED saving is converted to cost or CO2.
+  - The state-hour counterfactual trap.

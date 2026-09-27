@@ -104,7 +104,7 @@ def test_acknowledge_accept_stays_not_verified_and_audit(client):
     r = client.post(f"/recommendations/{rec['id']}/acknowledge",
                     json={"decision": "ACCEPTED", "note": "reviewed"})
     assert r.status_code == 200, r.text[:500]
-    assert r.json()["status"] == "ACCEPTED"
+    assert r.json()["status"] == "APPROVED"  # Phase 5: ACCEPTED is an alias of APPROVED
     assert r.json()["verification_status"] == "NOT_VERIFIED"
     # Second decision -> 409.
     r2 = client.post(f"/recommendations/{rec['id']}/acknowledge",

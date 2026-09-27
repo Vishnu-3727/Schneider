@@ -1,13 +1,12 @@
-# JouleMitra — Phase 4 (optimisation → recommendations, human-in-the-loop)
+# JouleMitra — Phase 5 (interventions → counterfactual savings verification)
 
 Authoritative spec: `docs/spec/MASTER_SPEC.md`. Phase 1 committed (de875e9);
 Phase 2 scope: `docs/IMPLEMENTATION_PLAN.md` Phase 2 section. Simulator
 constants: `docs/ASSUMPTIONS.md`. Model cards: `docs/ML_MODELS.md`
 (baseline v1-linear; health `statistical-v1`; external `pbl-rul` adapter;
 CP-SAT scheduler + recommendation rules). Scenarios: `docs/SIMULATION.md`.
-Latest verification numbers: see docs/VALIDATION.md (Phase 2 table; Phase 3
-section; Phase 4 section to be filled by manager from live run). Do not
-begin Phase 5 (no intervention simulation, no savings verification).
+Latest verification numbers: see docs/VALIDATION.md (Phases 2–5, all on
+SIMULATED data). Phase 6 (MQTT / edge / Modbus) has not begun.
 
 Phase 3 status: health interface (`MachineHealthModel` + registry),
 native `statistical-v1` (per-machine, state-conditioned median + MAD
@@ -34,8 +33,23 @@ recommendation engine (`POST /recommendations/generate`,
 NOT_VERIFIED; savings-fact wording banned) with Optimisation +
 Recommendations dashboard views (API-only, PROJECTED ≠ MEASURED ≠
 VERIFIED legend, illustrative tariff). All figures simulated/projected;
-no intervention, no savings verification, no carbon/cost engine beyond the
-projected schedule cost (Phase 5 work).
+the projected schedule cost is the only Phase 4 money figure.
+
+Phase 5 status: explicit lifecycle (PENDING_REVIEW → APPROVED | REJECTED →
+APPLIED → MEASURED → VERIFIED | NOT_VERIFIED | NOT_COMPARABLE |
+INSUFFICIENT_DATA; `services/verification/lifecycle.py`, 409 on any illegal
+move, audit row per move; Phase 4 `ACCEPTED` renamed `APPROVED`).
+`POST /interventions` (idempotent by key), `POST /interventions/{id}/verify`
+(idempotent), `GET /interventions`, `GET /verification`,
+`GET /emission-factors`. Verification is a counterfactual (IPMVP/ISO 50015
+style): OLS on hourly production at t-1, t, t+1 fitted before the
+intervention (never on state hours, which the intervention changes), with
+ASHRAE Guideline 14 savings uncertainty. Only a VERIFIED saving is turned
+into cost (illustrative tariff, labelled) and CO2 (CEA grid factor with
+provenance). The simulator's chronic-holding waste and the REDUCE_IDLE /
+REPAIR interventions (effectiveness, compliance, rebound) produce SUCCESS,
+NO_EFFECT, WORSE, NOT_COMPARABLE and INSUFFICIENT_DATA from physics, not
+from labels. Dashboard: Verification view.
 
 ## Prerequisites
 

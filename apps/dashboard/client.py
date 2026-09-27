@@ -135,3 +135,24 @@ def get_recommendations(machine_id: str | None = None,
 def acknowledge_recommendation(rec_id: str, decision: str, note: str = "") -> dict:
     return _post(f"/recommendations/{rec_id}/acknowledge",
                  {"decision": decision, "note": note})
+
+
+def create_intervention(payload: dict) -> dict:
+    return _post("/interventions", payload)
+
+
+def verify_intervention(iv_id: str, start_iso: str, end_iso: str) -> dict:
+    return _post(f"/interventions/{iv_id}/verify", {"start": start_iso, "end": end_iso},
+                 timeout=120.0)
+
+
+def get_interventions(status: str | None = None) -> dict:
+    return _get("/interventions", {"status": status} if status else None)
+
+
+def get_verification() -> dict:
+    return _get("/verification")
+
+
+def get_emission_factors() -> dict:
+    return _get("/emission-factors")

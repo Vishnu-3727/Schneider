@@ -346,3 +346,57 @@ labelled SIMULATED/ASSUMPTION and every simulator record carries
   observed heating into base + reheat by carving the rule's reheat out of
   the observed heating (total heating slots unchanged), exactly as it does
   for the recommended schedule.
+
+## A27 — Savings verification: counterfactual drivers (Phase 5A)
+- ASSUMPTION: The counterfactual ("what energy would have been used without
+  the intervention") is an OLS model fitted on the PRE-intervention window
+  using only hourly good production at t-1, t and t+1 (plus an intercept).
+  Machine-state hours are NOT drivers.
+- WHY: A driver the intervention changes would absorb the saving.
+  REDUCE_IDLE turns powered holding into idle, so a model fed post-period
+  state hours predicts the lower energy as "expected".
+  `tests/unit/test_verification.py::test_state_hour_drivers_would_erase_a_real_saving`
+  demonstrates this on simulated data. Neighbouring hours are used because
+  a heat's heating hour precedes its melting hour.
+- IMPACT: Savings are reported only relative to production-driven
+  expectations. Other exogenous drivers of a real plant (ambient
+  temperature, product mix, shift calendar) are not modelled yet and must be
+  added before plant use.
+
+## A28 — Savings uncertainty and outcome thresholds (Phase 5A)
+- ASSUMPTION: ASHRAE Guideline 14 fractional savings uncertainty
+  `U = t * 1.26 * CV * sqrt((n/n')(1+2/n)(1/m)) * E_cf`, with the Student-t
+  value at VERIFY_CONFIDENCE (default 90 %, two-sided) and n' corrected for
+  positive lag-1 residual autocorrelation (negative autocorrelation is
+  clipped to 0, which is conservative). VERIFIED only when saving > U and
+  saving > 0. |saving| <= U gives NOT_VERIFIED (no effect); saving < -U gives
+  NOT_VERIFIED (worse, reported explicitly). A baseline fit that fails G14
+  (CV(RMSE) 30 %, NMBE 10 %), fewer than VERIFY_MIN_BASELINE_POINTS or
+  VERIFY_MIN_POST_POINTS usable hours, or completeness below
+  VERIFY_MIN_COMPLETE_FRAC gives INSUFFICIENT_DATA. A mean production change
+  beyond VERIFY_PROD_TOL_PCT (15 %), or more than 5 % of measurement hours
+  beyond the baseline production range, gives NOT_COMPARABLE. Neither
+  reports a saving.
+- WHY: G14 is the standard M&V uncertainty method for regression baselines;
+  the thresholds keep a counterfactual from extrapolating or resting on thin
+  data.
+- IMPACT: Small real savings (e.g. a 50 %-effective fix with 60 %
+  compliance, about +106 kWh over 3 days against ±155 kWh) correctly come
+  out as NOT_VERIFIED. A longer measurement window narrows U.
+
+## A29 — Intervention simulation parameters (Phase 5A, SIMULATED)
+- ASSUMPTION: Chronic waste = the furnace is kept energised at holding
+  power for `chronic_idle_hold_frac` (tests: 0.6) of every idle gap.
+  REDUCE_IDLE lowers that share to chronic × (1 - effectiveness) on each gap
+  that operators follow (probability `compliance`). `rebound` = extra
+  heating minutes per minute the furnace was left cold, carved out of the
+  same gap so heat timing and production are unchanged. REPAIR removes a
+  constant `chronic_energy_penalty` power uplift scaled by effectiveness.
+  `post_idle_scale` changes post-period production; `gap_h` drops a window
+  of telemetry and production (outage).
+- WHY: Outcomes must emerge from cause and effect. The same code path yields
+  SUCCESS, NO_EFFECT (effectiveness 0), WORSE (rebound 1.0: reheating at
+  about 127 kW outweighs the about 55 kW holding-vs-idle saving),
+  NOT_COMPARABLE and INSUFFICIENT_DATA.
+- IMPACT: Parameter values are illustrative, not measured furnace
+  behaviour. Every figure produced with them is SIMULATED.

@@ -174,6 +174,22 @@ class SimulatedInductionFurnace(SimulatedMachine):
         self._day_plans: dict[int, int] = {}
         self._heats_today = 0
         self._shift_extra_pending = False
+        # Phase 5 idle-practice knobs (NORMAL: 0.0 / None / 1.0 / 0.0; with
+        # these defaults no extra rng draw happens, so NORMAL stays
+        # byte-identical). idle_hold_frac: share of every idle gap the
+        # furnace is kept energised at holding power (chronic waste).
+        # idle_hold_frac_fixed: the share after a REDUCE_IDLE intervention
+        # (None = no intervention). fix_compliance: probability that a given
+        # gap follows the fixed practice. reheat_per_cold_min: rebound, i.e.
+        # extra heating minutes the next heat needs per minute the furnace
+        # was left cold instead of held; taken out of the same gap so the
+        # production timing is unchanged.
+        self.idle_hold_frac = 0.0
+        self.idle_hold_frac_fixed: float | None = None
+        self.fix_compliance = 1.0
+        self.reheat_per_cold_min = 0.0
+        self._hold_until: dict[float, float] = {}  # idle segment start -> hold end
+        self._pending_reheat_min = 0.0
 
     def _next_segment(self) -> None:
         """Append one schedule segment using the shared seeded rng."""
@@ -186,7 +202,8 @@ class SimulatedInductionFurnace(SimulatedMachine):
         plan = self._day_plans[day]
         phase = self._phase
         if phase == "heating":
-            dur = max(12.0, 20.0 + self.rng.normal(0, 1.5))
+            dur = max(12.0, 20.0 + self.rng.normal(0, 1.5)) + self._pending_reheat_min
+            self._pending_reheat_min = 0.0
             prod = 0.0
         elif phase == "melting":
             # Charge varies ±8 %; duration follows charge / melting power + noise.
@@ -219,6 +236,11 @@ class SimulatedInductionFurnace(SimulatedMachine):
                 self._shift_extra_pending = False
             dur = max(1.0, dur)
             prod = 0.0
+            if self.idle_hold_frac > 0.0:
+                self._plan_idle_hold(self._built_until_min, dur)
+                # Rebound reheat is carved out of this gap (the next heat
+                # starts heating earlier), so heats keep their NORMAL timing.
+                dur = max(1.0, dur - self._pending_reheat_min)
         start = self._built_until_min
         end = start + dur
         self._segments.append((phase, start, end, prod))
@@ -228,6 +250,17 @@ class SimulatedInductionFurnace(SimulatedMachine):
         if phase == "idle":
             self._heats_today += 1
         self._phase = nxt
+
+    def _plan_idle_hold(self, gap_start: float, gap_min: float) -> None:
+        """Decide how much of this idle gap is spent energised at holding."""
+        frac = self.idle_hold_frac
+        if self.idle_hold_frac_fixed is not None:
+            followed = self.rng.random() < self.fix_compliance
+            if followed:
+                frac = self.idle_hold_frac_fixed
+                cold_min = (self.idle_hold_frac - frac) * gap_min
+                self._pending_reheat_min = max(0.0, self.reheat_per_cold_min * cold_min)
+        self._hold_until[gap_start] = gap_start + frac * gap_min
 
     def _ensure(self, elapsed_min: float) -> None:
         while self._built_until_min <= elapsed_min:
@@ -247,6 +280,8 @@ class SimulatedInductionFurnace(SimulatedMachine):
         for s, a, b, p in reversed(self._segments):
             if a <= elapsed_min < b:
                 state, prod = s, p
+                if s == "idle" and elapsed_min < self._hold_until.get(a, a):
+                    state = "holding"  # energised, hot, no production (waste)
                 break
         power = self.rated_power_kw * self.POWER_FRAC[state] * self.power_scale
         power *= 1 + self.rng.normal(0, 0.01)

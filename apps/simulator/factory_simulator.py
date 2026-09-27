@@ -121,6 +121,11 @@ class SimulatedFactory:
         omit_health_signals: bool = False,
         tariff_peak_start_h: float = DEFAULT_TARIFF_PEAK_START_H,
         tariff_peak_end_h: float = DEFAULT_TARIFF_PEAK_END_H,
+        chronic_idle_hold_frac: float = 0.0,
+        chronic_energy_penalty: float = 0.0,
+        intervention: dict | None = None,
+        post_idle_scale: float | None = None,
+        gap_h: tuple[float, float] | None = None,
     ) -> None:
         self.scenario = Scenario(scenario)
         if self.scenario in NOT_IMPLEMENTED_SCENARIOS:
@@ -155,7 +160,73 @@ class SimulatedFactory:
         # When True, vibration/temperature/current are emitted as null
         # (emulates health data "unavailable"; energy path unaffected).
         self.omit_health_signals = omit_health_signals
+        # Phase 5 practice / intervention inputs (ASSUMPTION SIMULATED; see
+        # docs/ASSUMPTIONS.md). Defaults leave NORMAL byte-identical.
+        # chronic_idle_hold_frac: furnace kept energised at holding for this
+        # share of every idle gap for the whole run (chronic waste).
+        # chronic_energy_penalty: constant extra-load power fraction on
+        # furnace + compressor (a fault a REPAIR can remove).
+        # intervention: {"type": "REDUCE_IDLE" | "REPAIR", "start_h": elapsed
+        # hours, "effectiveness": 0..1, "compliance": 0..1, "rebound": extra
+        # reheat min per cold idle min}. The outcome comes from the physics;
+        # nothing here labels success or failure.
+        # post_idle_scale: furnace idle-gap multiplier from start_h on
+        # (a production change, for non-comparable post periods).
+        # gap_h: (start_h, end_h) elapsed window whose telemetry and
+        # production are dropped (a data outage).
+        if not 0.0 <= chronic_idle_hold_frac <= 1.0:
+            raise ValueError("chronic_idle_hold_frac must be in [0, 1]")
+        self.chronic_idle_hold_frac = chronic_idle_hold_frac
+        self.chronic_energy_penalty = chronic_energy_penalty
+        self.intervention = self._check_intervention(intervention)
+        self.post_idle_scale = post_idle_scale
+        self.gap_h = gap_h
         self._last_start: datetime | None = None
+
+    @staticmethod
+    def _check_intervention(iv: dict | None) -> dict | None:
+        if iv is None:
+            return None
+        if iv.get("type") not in ("REDUCE_IDLE", "REPAIR"):
+            raise ValueError("intervention type must be REDUCE_IDLE or REPAIR")
+        out = {"type": iv["type"], "start_h": float(iv.get("start_h", 0.0)),
+               "effectiveness": float(iv.get("effectiveness", 1.0)),
+               "compliance": float(iv.get("compliance", 1.0)),
+               "rebound": float(iv.get("rebound", 0.0))}
+        for k in ("effectiveness", "compliance"):
+            if not 0.0 <= out[k] <= 1.0:
+                raise ValueError(f"intervention {k} must be in [0, 1]")
+        if out["rebound"] < 0:
+            raise ValueError("intervention rebound must be >= 0")
+        return out
+
+    def _post(self, elapsed_h: float) -> bool:
+        iv = self.intervention
+        start_h = iv["start_h"] if iv else None
+        if start_h is None and self.post_idle_scale is not None:
+            start_h = 0.0
+        return start_h is not None and elapsed_h >= start_h
+
+    def _apply_practice(self, model, spec: MachineSpec, elapsed_h: float) -> None:
+        """Chronic operating practice + intervention knobs (after _reset_knobs)."""
+        iv = self.intervention
+        post = self._post(elapsed_h)
+        if spec.machine_type == "furnace" and hasattr(model, "idle_hold_frac"):
+            model.idle_hold_frac = self.chronic_idle_hold_frac
+            if iv and iv["type"] == "REDUCE_IDLE" and post:
+                model.idle_hold_frac_fixed = self.chronic_idle_hold_frac * (1.0 - iv["effectiveness"])
+                model.fix_compliance = iv["compliance"]
+                model.reheat_per_cold_min = iv["rebound"]
+            if post and self.post_idle_scale is not None:
+                model.idle_scale = self.post_idle_scale
+        if self.chronic_energy_penalty and spec.machine_type in ("furnace", "compressor"):
+            pen = self.chronic_energy_penalty
+            if iv and iv["type"] == "REPAIR" and post:
+                pen *= 1.0 - iv["effectiveness"]
+            model.power_ramp = pen
+
+    def _dropped(self, elapsed_h: float) -> bool:
+        return self.gap_h is not None and self.gap_h[0] <= elapsed_h < self.gap_h[1]
 
     # -- scenario helpers -------------------------------------------------
     def _in_window(self, elapsed_h: float) -> bool:
@@ -177,6 +248,7 @@ class SimulatedFactory:
     def _scenario_step(self, model, spec: MachineSpec, index: int, dt_h: float, elapsed_h: float):
         """Set public model knobs, then take exactly one model.step()."""
         self._reset_knobs(model)
+        self._apply_practice(model, spec, elapsed_h)
         if (
             self.scenario == Scenario.NORMAL
             or not self._in_window(elapsed_h)
@@ -245,6 +317,11 @@ class SimulatedFactory:
             model.power_ramp = 0.0
         if hasattr(model, "peak_cluster_window"):
             model.peak_cluster_window = None
+        if hasattr(model, "idle_hold_frac"):
+            model.idle_hold_frac = 0.0
+            model.idle_hold_frac_fixed = None
+            model.fix_compliance = 1.0
+            model.reheat_per_cold_min = 0.0
 
     def run(self) -> tuple[list[dict], list[dict]]:
         rng = np.random.default_rng(self.seed)
@@ -270,6 +347,8 @@ class SimulatedFactory:
                 ts = start + timedelta(seconds=i * self.step_s)
                 elapsed_h = (i * self.step_s) / 3600.0
                 s, _ = self._scenario_step(model, spec, i, dt_h, elapsed_h)
+                if self._dropped(elapsed_h):
+                    continue  # data outage: physics ran, nothing was recorded
                 omit = self.omit_health_signals
                 telemetry.append(
                     {

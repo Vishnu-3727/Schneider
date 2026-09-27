@@ -16,11 +16,12 @@ LEGEND = ("PROJECTED (model estimate) ≠ MEASURED (telemetry) ≠ "
           "VERIFIED (Phase 5 before/after check).")
 
 st.title("Recommendations — human review")
-st.caption(f"{LEGEND} Nothing here is executed; an accepted row stays "
+st.caption(f"{LEGEND} Nothing here is executed; an approved row stays "
            "NOT_VERIFIED until a Phase 5 before/after check.")
 
 status_filter = st.selectbox("Status", ["PENDING_REVIEW", "CONFLICT",
-                                        "ACCEPTED", "REJECTED", "ALL"], index=0)
+                                        "APPROVED", "REJECTED", "APPLIED", "VERIFIED",
+                                        "NOT_VERIFIED", "NOT_COMPARABLE", "INSUFFICIENT_DATA", "ALL"], index=0)
 
 data = get_recommendations(status=None if status_filter == "ALL" else status_filter)
 if isinstance(data, dict) and "error" in data:
@@ -57,11 +58,11 @@ for r in rows:
     if r.get("status") in ("PENDING_REVIEW", "CONFLICT"):
         c1, c2 = st.columns(2)
         if c1.button("Accept", key=f"acc-{r['id']}"):
-            res = acknowledge_recommendation(r["id"], "ACCEPTED", "accepted from dashboard")
+            res = acknowledge_recommendation(r["id"], "APPROVED", "approved from dashboard")
             if "error" in res:
                 st.error(res["error"])
             else:
-                st.success(f"Accepted {r['id']} — still {res.get('verification_status')}.")
+                st.success(f"Approved {r['id']} — still {res.get('verification_status')}.")
                 st.rerun()
         if c2.button("Reject", key=f"rej-{r['id']}"):
             res = acknowledge_recommendation(r["id"], "REJECTED", "rejected from dashboard")

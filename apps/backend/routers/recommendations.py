@@ -5,8 +5,9 @@ rules over open AnomalyEvents, Phase-3 health rows (correlated on read),
 process-efficiency findings and the latest overlapping optimization_run
 per machine (any status — INFEASIBLE explanations are surfaced, never
 hidden). Health-model or optimizer gaps never block the remaining
-sources. Acknowledge writes an audit_event row per decision; an accepted
-recommendation stays NOT_VERIFIED (verification is Phase 5 work).
+sources. Acknowledge writes an audit_event row per decision; an approved
+recommendation stays NOT_VERIFIED until an intervention is applied and
+verified (apps/backend/routers/interventions.py, Phase 5).
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from apps.backend.schemas import (
 from services.energy.aggregate import build_intervals
 from services.energy.process_efficiency import analyze, daily_metrics
 from services.recommendations.engine import generate
+from services.verification import lifecycle
 
 router = APIRouter()
 
@@ -282,9 +284,11 @@ def acknowledge(rec_id: str, body: RecommendationAcknowledgeRequest,
     if row is None:
         raise HTTPException(status_code=404, detail=f"Unknown recommendation id: {rec_id}")
     d = dict(zip(RECOMMENDABLE, row, strict=True))
-    if d["status"] in ("ACCEPTED", "REJECTED"):
-        raise HTTPException(status_code=409,
-                            detail=f"Recommendation already decided: {d['status']}")
+    if not lifecycle.can(d["status"], body.decision):
+        raise HTTPException(
+            status_code=409,
+            detail=(f"Recommendation already decided or past review: status {d['status']}; "
+                    f"allowed next: {list(lifecycle.allowed(d['status'])) or 'none'}"))
     updated = db.execute(
         text(
             "UPDATE recommendation SET status = :st, decided_at = now(), "
