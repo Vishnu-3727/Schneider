@@ -1,0 +1,10 @@
+.venv/
+.env
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/simulated/*.csv
+!data/simulated/.gitkeep
+*.db
+.streamlit/

@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: joulemitra
+      POSTGRES_PASSWORD: joulemitra
+      POSTGRES_DB: joulemitra
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U joulemitra"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://joulemitra:joulemitra@db:5432/joulemitra
+      TEST_DATABASE_URL: postgresql+psycopg://joulemitra:joulemitra@db:5432/joulemitra_test
+      API_BASE_URL: http://backend:8000
+      TZ: Asia/Kolkata
+      STALE_AFTER_S: 900
+      CLOCK_SKEW_S: 300
+      SPIKE_MULTIPLE: 1.5
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["uvicorn", "apps.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  dashboard:
+    build: .
+    environment:
+      API_BASE_URL: http://backend:8000
+      TZ: Asia/Kolkata
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    command: ["streamlit", "run", "apps/dashboard/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+
+volumes:
+  pgdata:

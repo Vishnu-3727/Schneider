@@ -1,0 +1,87 @@
+"""Phase 1 Pydantic schemas — units in field names, tz-aware ts, source tags."""
+
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class Source(str, Enum):
+    MEASURED = "MEASURED"
+    SIMULATED = "SIMULATED"
+    DERIVED = "DERIVED"
+    EXTERNAL_REFERENCE = "EXTERNAL_REFERENCE"
+    PROJECTED = "PROJECTED"
+    ASSUMPTION = "ASSUMPTION"
+
+
+class MachineStateEnum(str, Enum):
+    HEATING = "heating"
+    MELTING = "melting"
+    HOLDING = "holding"
+    IDLE = "idle"
+    SHUTDOWN = "shutdown"
+    AUXILIARY = "auxiliary"
+    RUNNING = "running"
+    STOPPED = "stopped"
+
+
+def _require_tz_aware(v: datetime) -> datetime:
+    if v.tzinfo is None or v.tzinfo.utcoffset(v) is None:
+        raise ValueError("ts must be timezone-aware (e.g. 2026-01-01T00:00:00+05:30)")
+    return v
+
+
+class TelemetryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    machine_id: str
+    ts: datetime = Field(description="Timezone-aware timestamp")
+    voltage_v: float | None = None
+    current_a: float | None = None
+    power_kw: float | None = None
+    reactive_power_kvar: float | None = None
+    power_factor: float | None = None
+    energy_kwh: float | None = Field(default=None, description="Cumulative counter, kWh")
+    vibration_mm_s: float | None = None
+    temperature_c: float | None = None
+    rpm: float | None = None
+    runtime_h: float | None = None
+    machine_state: MachineStateEnum | None = None
+    source: Source
+
+    _tz = field_validator("ts")(_require_tz_aware)
+
+
+class TelemetryBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    records: list[TelemetryRecord]
+
+
+class ProductionRecordIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    machine_id: str
+    window_start: datetime
+    window_end: datetime
+    qty_total_kg: float
+    qty_good_kg: float
+    qty_rejected_kg: float
+    batch_id: str = ""
+    operating_time_h: float = 0.0
+    source: Source
+
+    _tz_start = field_validator("window_start")(_require_tz_aware)
+    _tz_end = field_validator("window_end")(_require_tz_aware)
+
+
+class ProductionBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    records: list[ProductionRecordIn]
+
+
+class IngestResult(BaseModel):
+    accepted: int
+    suspect: int
+    bad: int
+    duplicate: int
