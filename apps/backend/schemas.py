@@ -146,3 +146,70 @@ class HealthScoreRequest(BaseModel):
     _tz_start = field_validator("start")(_require_tz_aware)
     _tz_end = field_validator("end")(_require_tz_aware)
     _order = field_validator("end")(_require_end_after_start)
+
+
+class AuxTaskIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    duration_h: float = Field(description="Fixed task duration, hours")
+    window_start_h: float = Field(description="Earliest start, hours since horizon start")
+    window_end_h: float = Field(description="Latest end, hours since horizon start")
+    power_kw: float
+
+
+class OptimizationConstraintsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    required_kg: float | None = Field(default=None, description="Required good production, kg")
+    required_heats: int | None = Field(default=None, description="Required heat count")
+    peak_cap_kw: float | None = None
+    operating_windows_h: list[list[float]] | None = Field(
+        default=None, description="Allowed [[start_h, end_h]] hours since horizon start")
+    maintenance_windows_h: list[list[float]] | None = Field(
+        default=None, description="Unavailable [[start_h, end_h]] hours since horizon start")
+    aux_tasks: list[AuxTaskIn] = Field(default_factory=list)
+    slot_min: int | None = None
+    horizon_h: float | None = None
+    w_energy: float | None = None
+    w_peak: float | None = None
+    w_cost: float | None = None
+    time_limit_s: float | None = None
+    deterministic_time_s: float | None = Field(
+        default=None, description="Deterministic CP-SAT budget (primary); wall time_limit_s stays the safety net")
+    random_seed: int | None = None
+
+
+class OptimizationRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    machine_id: str
+    date: str | None = Field(default=None, description="Horizon date YYYY-MM-DD (site tz)")
+    start: datetime | None = Field(default=None, description="Timezone-aware horizon start")
+    end: datetime | None = Field(default=None, description="Timezone-aware horizon end")
+    constraints: OptimizationConstraintsIn = Field(default_factory=OptimizationConstraintsIn)
+
+
+class RecommendationGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: datetime = Field(description="Timezone-aware window start")
+    end: datetime = Field(description="Timezone-aware window end")
+
+    _tz_start = field_validator("start")(_require_tz_aware)
+    _tz_end = field_validator("end")(_require_tz_aware)
+    _order = field_validator("end")(_require_end_after_start)
+
+
+class RecommendationAcknowledgeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: str = Field(description="ACCEPTED or REJECTED")
+    note: str = Field(default="", description="Reviewer note")
+
+    @field_validator("decision")
+    @classmethod
+    def _decision(cls, v: str) -> str:
+        if v not in ("ACCEPTED", "REJECTED"):
+            raise ValueError("decision must be ACCEPTED or REJECTED")
+        return v

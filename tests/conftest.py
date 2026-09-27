@@ -34,6 +34,7 @@ def client(_test_db):
         with eng.begin() as conn:
             for tbl in ("telemetry", "production_record", "machine_state", "audit_event",
                         "anomaly_event", "energy_baseline",
-                        "machine_health", "machine_health_reference"):
+                        "machine_health", "machine_health_reference",
+                        "optimization_run", "recommendation"):
                 conn.execute(text(f"TRUNCATE {tbl}"))
         yield c

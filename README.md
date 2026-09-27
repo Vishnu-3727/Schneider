@@ -1,12 +1,13 @@
-# JouleMitra — Phase 3 (machine health → correlation → PBL adapter)
+# JouleMitra — Phase 4 (optimisation → recommendations, human-in-the-loop)
 
 Authoritative spec: `docs/spec/MASTER_SPEC.md`. Phase 1 committed (de875e9);
 Phase 2 scope: `docs/IMPLEMENTATION_PLAN.md` Phase 2 section. Simulator
 constants: `docs/ASSUMPTIONS.md`. Model cards: `docs/ML_MODELS.md`
-(baseline v1-linear; health `statistical-v1`; external `pbl-rul` adapter).
-Scenarios: `docs/SIMULATION.md`. Latest verification numbers:
-see docs/VALIDATION.md (Phase 2 table; Phase 3 section to be filled by
-manager from live run). Do not begin Phase 4.
+(baseline v1-linear; health `statistical-v1`; external `pbl-rul` adapter;
+CP-SAT scheduler + recommendation rules). Scenarios: `docs/SIMULATION.md`.
+Latest verification numbers: see docs/VALIDATION.md (Phase 2 table; Phase 3
+section; Phase 4 section to be filled by manager from live run). Do not
+begin Phase 5 (no intervention simulation, no savings verification).
 
 Phase 3 status: health interface (`MachineHealthModel` + registry),
 native `statistical-v1` (per-machine, state-conditioned median + MAD
@@ -22,6 +23,19 @@ power NORMAL; `energy_penalty > 0` raises power AND current at nominal
 voltage). 118 pre-existing tests preserved; PBL adds unit + integration
 tests including an optional ONNX test (runs when `PBL_TEST_ONNX_PATH`
 points at a local artifact and the `[pbl]` extra is installed).
+
+Phase 4 status: tariff-aware CP-SAT scheduling (`POST /optimization/run`,
+`GET /optimization/schedule`, current vs recommended, projected energy /
+peak / cost / production + per-state breakdown, INFEASIBLE explanations,
+deterministic budget with a wall-clock TIMEOUT safety net) and a pure-rule
+recommendation engine (`POST /recommendations/generate`,
+`GET /recommendations`, `POST /recommendations/{id}/acknowledge` with
+404/409; idempotent; conflicts flagged, never dropped; accepted rows stay
+NOT_VERIFIED; savings-fact wording banned) with Optimisation +
+Recommendations dashboard views (API-only, PROJECTED ≠ MEASURED ≠
+VERIFIED legend, illustrative tariff). All figures simulated/projected;
+no intervention, no savings verification, no carbon/cost engine beyond the
+projected schedule cost (Phase 5 work).
 
 ## Prerequisites
 

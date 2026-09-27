@@ -1,4 +1,4 @@
-# JouleMitra — Assumptions (Phases 1–3A)
+# JouleMitra — Assumptions (Phases 1–4B)
 
 Every entry: ASSUMPTION / WHY / IMPACT. All simulator numeric constants are
 labelled SIMULATED/ASSUMPTION and every simulator record carries
@@ -217,3 +217,132 @@ labelled SIMULATED/ASSUMPTION and every simulator record carries
   notices. Correlation text never claims causation (banned: cause/caused/
   because/due to/results from); the single sanctioned disclaimer is
   "This is a correlation, not an established cause".
+
+## A20 — TARIFF_SHIFT simulator parameters (SIMULATED)
+- ASSUMPTION: The ILLUSTRATIVE peak window (default 18:00–22:00 local,
+  `TARIFF_SHIFT_PEAK_START_H/_END_H`, aligned with the seeded
+  `evening_peak` tariff period) clusters furnace heats by scaling idle gaps
+  only: 0.10x inside the window (heats pack in), 1.6x outside (daily heat
+  count stays close to NORMAL). Per-heat physics (charge ±8 %, melt rate,
+  holding 18–34 min, power fractions, PF) is untouched NORMAL physics.
+- WHY: Models flexible, non-critical timing (running when power is most
+  expensive) without inventing new physics; the same machine models are reused.
+- IMPACT: Clustering strengths are illustrative, not measured behaviour;
+  the 4 h window cannot hold a full NORMAL day of heats, so total production
+  drops slightly vs NORMAL. Optimiser tests derive the requirement from the
+  day actually produced, so the comparison stays fair.
+
+## A21 — Optimizer model simplifications (PROJECTED)
+- ASSUMPTION: Nominal planning uses a fixed charge per heat
+  (`OPT_HEAT_CHARGE_KG=375`, melt time = charge / `OPT_MELT_RATE_KG_H`);
+  heating fixed (`OPT_HEATING_H`); holding bounded [`OPT_HOLD_MIN_H`,
+  `OPT_HOLD_MAX_H`] = [0.25, 0.75] h (illustrative metallurgical limits,
+  plant to confirm). Re-optimising an observed day instead keeps each
+  heat's own observed base heating / melting / holding durations on BOTH
+  sides (current and recommended); holding is fixed at observed because the
+  model does not represent schedule-induced waiting inside holding, so the
+  optimiser cannot shorten it. One furnace, ordered non-overlap; operating
+  windows default to the full horizon; the first heat of a horizon never
+  incurs reheat (`first_heat_cold=false`); cold threshold
+  (`OPT_COLD_THRESHOLD_H=2.0` h) and reheat extra (`OPT_REHEAT_EXTRA_H`)
+  are rounded to whole slots and applied by one shared rule to both
+  schedules; reheat is carved OUT of observed heating slots (total heating
+  slots unchanged; if observed heating is shorter than the rule's reheat,
+  the shortfall is recorded rather than extending the heat); energy = stored
+  Phase-2 baseline coefficients (never invented); peak = per-state NORMAL
+  median powers (DERIVED); demand charge (when a tariff carries one) = peak
+  × max demand rate; missing tariff → cost term omitted, reported
+  "unavailable (no tariff)". Determinism = fixed `random_seed` + 1 worker +
+  time limit (identical schedules on identical inputs/config on the same
+  build; short limits may return FEASIBLE instead of proven OPTIMAL).
+- WHY: Keeps the CP-SAT model linear, small and auditable; every number the
+  optimiser outputs is labelled PROJECTED and needs plant validation. Fair
+  sides (same intrinsic durations, symmetric reheat carved from observed
+  heating) keep projected deltas to genuine gap effects (reheat avoided,
+  idle vs holding) and time-of-use placement.
+- IMPACT: Real heats vary charge; real reheat depends on thermal state, not
+  a clock threshold; demand billing here is a simplification. Short solver
+  limits trade optimality proofs for speed — acceptance asserts FEASIBLE-or-
+  better plus the independent validate() on every output.
+
+## A22 — Illustrative tariff seed (ASSUMPTION, not a tariff order)
+- ASSUMPTION: `database/seeds/phase4_tariff.sql` holds ONE time-of-use
+  tariff for the demo site (night 6.0 / day 7.5 / evening-peak 18–22 10.5
+  INR/kWh, no demand charge), `source_class=ASSUMPTION`, every row stamped
+  "ILLUSTRATIVE - not a real tariff order - replace with the plant DISCOM
+  tariff". Prices live only in the seed, never in code; a period with
+  end <= start wraps past midnight. Re-seeding only overwrites rows still
+  labelled ASSUMPTION, never a real DISCOM tariff entered later.
+- WHY: The optimiser needs a price signal to demonstrate tariff-aware
+  scheduling before the plant shares its tariff order.
+- IMPACT: All cost figures are PROJECTED illustrative estimates ("Requires
+  plant validation"); replace the seed with the DISCOM order before any
+  commercial decision.
+
+## A23 — Deterministic solver budget with a wall-clock safety net (PROJECTED)
+- ASSUMPTION: The primary CP-SAT budget is deterministic
+  (`max_deterministic_time` from `OPT_DETERMINISTIC_TIME`, per-run
+  overridable via `deterministic_time_s`); the effective wall-clock safety
+  net is `max(time_limit_s, deterministic_time + OPT_WALL_SLACK_S)`, always
+  larger than the deterministic budget on any machine speed. A FEASIBLE stop
+  at the wall-clock limit is machine-load-dependent, so it returns TIMEOUT
+  instead of a plan.
+- WHY: Full-horizon solves stop at FEASIBLE under a wall-clock limit, so
+  identical inputs could return different schedules depending on machine
+  load. The deterministic budget makes repeat solves byte-identical;
+  refusing wall-clock FEASIBLE plans keeps a load-dependent artefact out of
+  the decision chain.
+- IMPACT: A heavily loaded machine may report TIMEOUT where a wall-clock
+  FEASIBLE plan would previously (non-reproducibly) appear; re-run with a
+  larger deterministic budget. Determinism holds for identical
+  inputs/config on the same OR-Tools build.
+
+## A24 — Recommendation rules, wording, human-in-the-loop (Phase 4B)
+- ASSUMPTION: Pure rules first (`services/recommendations/engine.py`):
+  R-IDLE / R-PROCESS / R-INSPECT / R-RESCHEDULE / R-SEQUENCE / R-PRIORITISE /
+  R-NOPLAN over open anomalies, correlated insights, process findings and
+  the latest overlapping optimisation run. Quantities appear only as
+  projected optimiser deltas (`evidence_class=PROJECTED`, cost only with a
+  tariff labelled ILLUSTRATIVE/ASSUMPTION); inspection-style rows carry a
+  null effect, never a guessed number. A CRITICAL inspection overlapping an
+  optimiser action flags both rows CONFLICT with both reasons shown — never
+  silently dropped. Generation is idempotent (`dedup_key`); every
+  acknowledge writes an `audit_event` row; status stays NOT_VERIFIED until
+  Phase 5. Wording is projected/estimated; fact-stating savings language is
+  banned and unit-tested.
+- WHY: Phase 4 is decision support, not control: a human reviews every
+  proposal, and unverifiable savings must not be stated as fact.
+- IMPACT: Guidance only — no actuation, no verification claims; conflicting
+  rows need explicit human resolution.
+
+## A26 — Recommendation comparability (Phase 4B)
+- ASSUMPTION: Every optimiser-backed recommendation (R-RESCHEDULE, R-SEQUENCE)
+  computes `comparable: bool` and `comparability_reason`. Comparable requires
+  same production (within `PRODUCTION_TOLERANCE = 1%`) AND same auxiliary
+  tasks (same aux energy in breakdown). When not comparable, all projected
+  quantities (kWh, peak, INR) are null; the reason text shows "NOT
+  COMPARABLE: <reason>" and never claims "same production". Per-kg projected
+  energy (kWh/t) is shown for both sides labelled PROJECTED. R-SEQUENCE gap
+  delta uses holding + idle + reheat (not just holding + idle), and the
+  components are stated in the evidence.
+- WHY: Prevents false equivalence claims (e.g. 1500 kg current vs 1125 kg
+  recommended presented as "same production"); makes it explicit when
+  projected deltas are not apples-to-apples.
+- IMPACT: Dashboard Optimization view and API response show comparability
+  flag prominently; non-comparable rows carry no quantified effect, only
+  per-kg projections for reference.
+
+## A25 — Energy breakdown semantics (PROJECTED)
+- ASSUMPTION: `evaluate()` reports heating / melting / holding / idle /
+  reheat / intercept / aux kWh, which sum to the total. Melting carries the
+  production-term energy; reheat is the cold-gap subset of heating slots
+  (`HeatPlan.reheat_slots`); intercept is spread uniformly; aux is extra.
+  Reheat is carved OUT of observed heating slots (base = observed - reheat,
+  floored at 0; total heating slots preserved).
+- WHY: Makes the source of projected differences (e.g. the TARIFF_SHIFT
+  day's lower energy) visible instead of a single opaque total.
+- IMPACT: Breakdowns compare model structure, not measurements; reheat is
+  assigned symmetrically — the shared gap rule splits reconstructed
+  observed heating into base + reheat by carving the rule's reheat out of
+  the observed heating (total heating slots unchanged), exactly as it does
+  for the recommended schedule.

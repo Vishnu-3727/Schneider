@@ -6,15 +6,18 @@ overrides of the machine-model knobs (parameterised by start offset,
 duration and magnitude); Phase 3A adds EQUIPMENT_DEGRADATION (gradual
 vibration/temperature rise with an optional extra-mechanical-load power
 AND current uplift at nominal voltage) plus an omit_health_signals
-option. TARIFF_SHIFT and COMBINED_ANOMALY still raise NotImplementedError
-(Phase 4+).
+option. Phase 4A adds TARIFF_SHIFT: NORMAL physics with the day's heats
+clustered in the (illustrative) peak-tariff window via the furnace
+peak_cluster_window knob — only inter-heat TIMING changes, per-heat
+physics is untouched. COMBINED_ANOMALY still raises NotImplementedError.
 
 Scenario effects are applied BEFORE energy integration: the factory only
 sets public override knobs on the machine model (power_scale, idle_scale,
-force_state, force_loaded, health_ramp, power_ramp) and then calls
-model.step() exactly once, so the cumulative counter stays consistent and
-no physics lives in the factory. Ground-truth scenario windows are
-exposed via scenario_windows() for tests only — never stored as telemetry.
+force_state, force_loaded, health_ramp, power_ramp, peak_cluster_window)
+and then calls model.step() exactly once, so the cumulative counter stays
+consistent and no physics lives in the factory. Ground-truth scenario
+windows are exposed via scenario_windows() for tests only — never stored
+as telemetry.
 """
 
 from __future__ import annotations
@@ -40,7 +43,10 @@ class Scenario(str, Enum):
     COMBINED_ANOMALY = "COMBINED_ANOMALY"
 
 
-PHASE3_SCENARIOS = {Scenario.TARIFF_SHIFT, Scenario.COMBINED_ANOMALY}
+NOT_IMPLEMENTED_SCENARIOS = {Scenario.COMBINED_ANOMALY}
+
+#: Alias kept for older imports (fault_generator, tests).
+PHASE3_SCENARIOS = NOT_IMPLEMENTED_SCENARIOS
 
 #: Default power uplift for HIGH_LOAD (fraction). Kept below the ingest spike
 #: multiple (1.5x) so scenario rows stay GOOD quality.
@@ -62,6 +68,13 @@ DEFAULT_SURGE_MAGNITUDE = 0.30
 DEFAULT_DEGRADATION_MAGNITUDE = 1.0
 DEFAULT_ENERGY_PENALTY = 0.0
 
+#: Default TARIFF_SHIFT peak window (hour of day, local). Illustrative
+#: alignment with the seeded tariff's evening_peak period; the authoritative
+#: values are TARIFF_SHIFT_PEAK_START_H/_END_H in config (prices live only
+#: in the tariff seed, never here).
+DEFAULT_TARIFF_PEAK_START_H = 18.0
+DEFAULT_TARIFF_PEAK_END_H = 22.0
+
 #: Machine types each scenario overrides; other types run NORMAL
 #: (pump doubles as an unaffected control in every scenario run).
 SCENARIO_SCOPE = {
@@ -69,6 +82,7 @@ SCENARIO_SCOPE = {
     Scenario.HIGH_LOAD: ("furnace", "compressor"),
     Scenario.PRODUCTION_SURGE: ("furnace",),
     Scenario.EQUIPMENT_DEGRADATION: ("furnace", "compressor"),
+    Scenario.TARIFF_SHIFT: ("furnace",),
 }
 
 
@@ -105,12 +119,15 @@ class SimulatedFactory:
         magnitude: float | None = None,
         energy_penalty: float | None = None,
         omit_health_signals: bool = False,
+        tariff_peak_start_h: float = DEFAULT_TARIFF_PEAK_START_H,
+        tariff_peak_end_h: float = DEFAULT_TARIFF_PEAK_END_H,
     ) -> None:
         self.scenario = Scenario(scenario)
-        if self.scenario in PHASE3_SCENARIOS:
+        if self.scenario in NOT_IMPLEMENTED_SCENARIOS:
             raise NotImplementedError(
-                f"Scenario {self.scenario.value} is Phase 4+ work; implemented: "
-                "NORMAL, IDLE_WASTE, HIGH_LOAD, PRODUCTION_SURGE, EQUIPMENT_DEGRADATION."
+                f"Scenario {self.scenario.value} is future work; implemented: "
+                "NORMAL, IDLE_WASTE, HIGH_LOAD, PRODUCTION_SURGE, "
+                "EQUIPMENT_DEGRADATION, TARIFF_SHIFT."
             )
         if magnitude is not None and magnitude < 0:
             raise ValueError("magnitude must be >= 0")
@@ -131,6 +148,10 @@ class SimulatedFactory:
         # Efficiency-loss uplift for EQUIPMENT_DEGRADATION only (fraction of
         # power at the same useful output). 0 -> HEALTH-ONLY (energy normal).
         self.energy_penalty = energy_penalty
+        # TARIFF_SHIFT peak window (hour of day, local) into which the
+        # day's furnace heats are clustered. Illustrative timing only.
+        self.tariff_peak_start_h = tariff_peak_start_h
+        self.tariff_peak_end_h = tariff_peak_end_h
         # When True, vibration/temperature/current are emitted as null
         # (emulates health data "unavailable"; energy path unaffected).
         self.omit_health_signals = omit_health_signals
@@ -196,6 +217,14 @@ class SimulatedFactory:
                 model.health_ramp = mag * progress
             if hasattr(model, "power_ramp"):
                 model.power_ramp = pen * progress
+        elif self.scenario == Scenario.TARIFF_SHIFT:
+            # NORMAL physics, flexible non-critical timing: the day's heats
+            # are clustered in the peak-tariff window (ASSUMPTION SIMULATED).
+            # Only the furnace idle-gap TIMING knob is set; power fractions,
+            # charge, melt rate and holding distributions are untouched.
+            if hasattr(model, "peak_cluster_window"):
+                model.peak_cluster_window = (
+                    self.tariff_peak_start_h, self.tariff_peak_end_h)
         else:
             raise AssertionError(f"unhandled scenario {self.scenario}")  # pragma: no cover
         return model.step(index, dt_h), True
@@ -214,6 +243,8 @@ class SimulatedFactory:
             model.health_ramp = 0.0
         if hasattr(model, "power_ramp"):
             model.power_ramp = 0.0
+        if hasattr(model, "peak_cluster_window"):
+            model.peak_cluster_window = None
 
     def run(self) -> tuple[list[dict], list[dict]]:
         rng = np.random.default_rng(self.seed)
@@ -226,7 +257,8 @@ class SimulatedFactory:
         for spec in self.machines:
             model = make_machine(spec.machine_id, spec.machine_type, spec.rated_power_kw, rng)
             if hasattr(model, "day_phase_h"):
-                # Anchor the compressor demand profile to wall-clock time.
+                # Anchor time-of-day profiles (compressor demand, furnace
+                # TARIFF_SHIFT clustering) to wall-clock time.
                 model.day_phase_h = start.hour + start.minute / 60.0 + start.second / 3600.0
             for i in range(self.steps):
                 # First-row alignment: ts = start + i*step, so telemetry

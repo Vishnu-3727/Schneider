@@ -82,6 +82,50 @@ class Settings(BaseSettings):
     PBL_ONNX_PATH: str = ""
     PBL_SENSOR_VOCAB_PATH: str = ""
 
+    # --- Phase 4A: process efficiency + tariff-aware optimisation ---
+    # Optimiser slot grid / horizon / solver budget (deterministic: 1 worker).
+    OPT_SLOT_MIN: int = 15
+    OPT_HORIZON_H: int = 24
+    OPT_TIME_LIMIT_S: float = 10.0
+    # Deterministic CP-SAT budget (max_deterministic_time): the primary,
+    # machine-load-independent search budget. The wall-clock
+    # OPT_TIME_LIMIT_S is only a safety net (must be larger); hitting it
+    # returns TIMEOUT, never a silently different FEASIBLE plan.
+    OPT_DETERMINISTIC_TIME: float = 5.0
+    # Slack added on top of the deterministic budget to form the effective
+    # wall-clock safety net: effective_wall = max(time_limit_s,
+    # deterministic_time + slack). Guarantees the deterministic budget, not
+    # the wall clock, bounds the search on any machine speed.
+    OPT_WALL_SLACK_S: float = 10.0
+    OPT_RANDOM_SEED: int = 42
+    OPT_NUM_WORKERS: int = 1
+    # Objective weights: w_energy * kWh + w_peak * kW + w_cost * INR.
+    OPT_W_ENERGY_KWH: float = 1.0
+    OPT_W_PEAK_KW: float = 10.0
+    OPT_W_COST_INR: float = 1.0
+    # Furnace heat template (ASSUMPTION illustrative metallurgy; plant to
+    # confirm): fixed charge per heat, melt duration = charge / melt rate,
+    # fixed heating phase, holding bounded by [min, max] (hard).
+    OPT_HEAT_CHARGE_KG: float = 375.0
+    OPT_MELT_RATE_KG_H: float = 500.0
+    OPT_HEATING_H: float = 0.333
+    OPT_HOLD_MIN_H: float = 0.25
+    OPT_HOLD_MAX_H: float = 0.75
+    # A gap longer than this between heats adds reheat extra time to the
+    # next heat's heating phase (documented simplification in ASSUMPTIONS).
+    OPT_COLD_THRESHOLD_H: float = 2.0
+    OPT_REHEAT_EXTRA_H: float = 0.25
+    # Minimum holding time needed for pouring (process-efficiency reference).
+    PROCESS_MIN_HOLD_H: float = 0.25
+    # TARIFF_SHIFT scenario: heats cluster inside this illustrative peak
+    # window (hours of day, local). No prices here; prices live in the seed.
+    TARIFF_SHIFT_PEAK_START_H: float = 18.0
+    TARIFF_SHIFT_PEAK_END_H: float = 22.0
+    # Production tolerance for comparability check (fraction, e.g. 0.01 = 1%).
+    # When current vs recommended production differs by more than this,
+    # schedules are NOT COMPARABLE and projected deltas are suppressed.
+    OPT_COMPARABLE_PROD_TOL: float = 0.01
+
 
 _settings: Settings | None = None
 

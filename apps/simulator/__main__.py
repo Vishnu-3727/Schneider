@@ -3,7 +3,10 @@
 Phase 2: --normal-days N generates N NORMAL days followed by a --hours
 scenario window, e.g. --normal-days 7 --scenario IDLE_WASTE --hours 24 --post.
 --magnitude sets the HIGH_LOAD power uplift fraction (default 0.25) or the
-PRODUCTION_SURGE production uplift fraction (default 0.30)."""
+PRODUCTION_SURGE production uplift fraction (default 0.30).
+TARIFF_SHIFT clusters the day's furnace heats in the peak window
+(--peak-start/--peak-end hours of day, default 18-22) with NORMAL physics.
+COMBINED_ANOMALY is still NotImplementedError."""
 
 from __future__ import annotations
 
@@ -17,6 +20,8 @@ from apps.simulator.factory_simulator import (
     DEFAULT_HIGH_LOAD_MAGNITUDE,
     DEFAULT_SURGE_MAGNITUDE,  # noqa: F401 (surfaced in --help)
     DEFAULT_MACHINES,
+    DEFAULT_TARIFF_PEAK_END_H,
+    DEFAULT_TARIFF_PEAK_START_H,
     MachineSpec,
     Scenario,
     SimulatedFactory,
@@ -50,6 +55,10 @@ def main(argv: list[str] | None = None) -> int:
                          f"or PRODUCTION_SURGE production uplift (default {DEFAULT_SURGE_MAGNITUDE})")
     ap.add_argument("--end", default=None,
                     help="Run end as ISO timestamp (default: now). Fixes windows for verify runs.")
+    ap.add_argument("--peak-start", type=float, default=None,
+                    help=f"TARIFF_SHIFT peak window start hour (default {DEFAULT_TARIFF_PEAK_START_H})")
+    ap.add_argument("--peak-end", type=float, default=None,
+                    help=f"TARIFF_SHIFT peak window end hour (default {DEFAULT_TARIFF_PEAK_END_H})")
     args = ap.parse_args(argv)
 
     try:
@@ -80,7 +89,13 @@ def main(argv: list[str] | None = None) -> int:
                                step_s=args.step_s, seed=args.seed, tz=settings.TZ,
                                end=end,
                                scenario_start_h=normal_h, scenario_duration_h=args.hours,
-                               magnitude=args.magnitude)
+                               magnitude=args.magnitude,
+                               tariff_peak_start_h=(args.peak_start
+                                                    if args.peak_start is not None
+                                                    else settings.TARIFF_SHIFT_PEAK_START_H),
+                               tariff_peak_end_h=(args.peak_end
+                                                  if args.peak_end is not None
+                                                  else settings.TARIFF_SHIFT_PEAK_END_H))
     telemetry, production = factory.run()
     print(f"scenario={scenario.value} seed={args.seed} telemetry={len(telemetry)} production={len(production)}")
     for mid, (ws, we) in factory.scenario_windows().items():

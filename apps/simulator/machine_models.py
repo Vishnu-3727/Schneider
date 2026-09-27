@@ -158,6 +158,15 @@ class SimulatedInductionFurnace(SimulatedMachine):
         # Scenario override knobs (NORMAL: 1.0 / 1.0 / None).
         self.idle_scale = 1.0
         self.force_state: str | None = None
+        # TARIFF_SHIFT knob (NORMAL: None): when set to a (start_h, end_h)
+        # hour-of-day window (local), idle gaps inside the window shrink
+        # (heats pack into the window) and gaps outside stretch, so a larger
+        # share of the day's heats lands in the window. Per-heat physics
+        # (charge, melt rate, holding, power fractions) is untouched NORMAL
+        # physics; only inter-heat TIMING changes. day_phase_h anchors
+        # elapsed time to wall-clock time (set by the factory).
+        self.peak_cluster_window: tuple[float, float] | None = None
+        self.day_phase_h: float = 0.0
         # Seeded heat schedule: list of (state, start_min, end_min, prod_rate_kg_h).
         self._segments: list[tuple[str, float, float, float]] = []
         self._built_until_min = 0.0
@@ -193,6 +202,16 @@ class SimulatedInductionFurnace(SimulatedMachine):
             base = max(8.0, 1440.0 / plan - 91.0)
             sc = self.idle_scale
             dur = base * sc + self.rng.normal(0, 3.0)
+            if self.peak_cluster_window is not None:
+                # TARIFF_SHIFT timing only (ASSUMPTION SIMULATED): shrink
+                # gaps inside the peak window (0.10x) so heats pack into it,
+                # stretch gaps outside (1.6x) to keep the daily heat count
+                # close to NORMAL. Strengths are illustrative; see
+                # docs/ASSUMPTIONS.md A20.
+                tod_h = (self._built_until_min / 60.0 + self.day_phase_h) % 24.0
+                ws, we = self.peak_cluster_window
+                inside = (ws <= tod_h < we) if ws <= we else (tod_h >= ws or tod_h < we)
+                dur = base * (0.10 if inside else 1.6) + self.rng.normal(0, 3.0)
             if self._heats_today == plan // 2:
                 dur += (30.0 + self.rng.uniform(0, 10.0)) * sc  # lunch idle
             if self._shift_extra_pending:

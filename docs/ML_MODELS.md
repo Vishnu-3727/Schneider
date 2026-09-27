@@ -1,4 +1,4 @@
-# JouleMitra — ML Models (Phase 2: expected-energy baseline; Phase 3: machine health)
+# JouleMitra — ML Models (Phase 2: expected-energy baseline; Phase 3: machine health; Phase 4: optimisation + recommendations)
 
 All numbers below are MEASURED on SIMULATED data (prototype, requires plant
 validation). Nothing here transfers to real plant performance. Model code:
@@ -196,3 +196,105 @@ fitted coefficients as equipment nameplate data.
     flow/demand + runtime + machine health.
   - The artifact is local-only (not distributed with JouleMitra;
     ownership/licence unresolved — see `.env.example`).
+
+## 6. Optimiser card: CP-SAT tariff-aware furnace scheduler (Phase 4A/4B, PROJECTED)
+
+- **Purpose.** Answer "when should the required heats run so projected
+  cost/peak/energy are lowest?" for one furnace over a slot grid —
+  decision support only, never control.
+- **Model.** Google OR-Tools CP-SAT (`services/optimization/scheduler.py`,
+  deterministic: 1 worker + fixed `random_seed` + deterministic budget
+  `max_deterministic_time` from `OPT_DETERMINISTIC_TIME`; wall-clock
+  `max_time_in_seconds` from `OPT_TIME_LIMIT_S` is only a safety net and a
+  wall-clock stop returns TIMEOUT, never a plan). Start-indicator
+  formulation with per-slot activity as prefix-sum differences; a greedy
+  earliest-packing hint seeds the first primal bound (hints never affect
+  correctness). Objective (exact integers): `w_energy·kWh + w_peak·peak_kW
+  + w_cost·INR` (weights `OPT_W_*`; cost term only with a tariff).
+- **Energy coefficients.** From the stored Phase-2 baseline fit for the
+  machine (`b_prod` kWh/kg carries melting energy; per-state kWh/h for
+  heating/holding/idle; intercept spread uniformly) — never invented.
+  Peak uses per-state median powers from NORMAL telemetry (DERIVED).
+  Cost uses the tariff periods; with no tariff the cost term is absent
+  and reported "unavailable (no tariff)" — a price is never invented.
+  One `evaluate()` scores current and recommended schedules alike.
+- **Constraints (hard).** Required production (heats), operating windows,
+  maintenance windows, peak cap, holding bounds [min, max] (metallurgical),
+  non-overlap, cold-gap reheat (gap > threshold adds reheat slots to the
+  next heat). Every output passes the independent `validate()`; violations
+  raise, never return. INFEASIBLE carries an explanation naming the
+  conflicting group(s) (`explain_infeasible`).
+- **What the optimiser can and cannot change (fair comparison).** The
+  optimiser moves heats in time (start slots, order, gap sizes) and places
+  load against tariff periods; it does NOT change a heat's intrinsic phase
+  durations. When re-optimising an observed day, each heat keeps its own
+  observed base heating (excluding reheat), melting and holding durations
+  (`OptConstraints.heat_templates`, built by `templates_from_heats`); the
+  recommended schedule therefore carries the same per-heat physics as the
+  reconstructed current schedule. Holding is kept FIXED at the observed
+  value (min_hold == max_hold): the constraint model has no representation
+  of schedule-induced waiting inside holding, so no part of holding is
+  shortened. One shared function (`assign_reheat`) decides reheat from the
+  gap and is applied identically to both schedules, with reconstructed
+  observed heating split into base + reheat by carving the rule's reheat
+  OUT of the observed heating slots (total heating slots unchanged; if
+  observed heating is shorter than the rule's reheat, the shortfall is
+  recorded rather than extending the heat). Planning from nominal durations
+  (explicit `required_heats`/`required_kg` overrides) uses the nominal
+  template on the recommended side. Projected energy deltas therefore come
+  only from genuine gap effects (reheat avoided, idle vs holding between
+  heats) and cost deltas from time-of-use placement — rescheduling can
+  neither remove a pouring delay nor shorten a heat's physical heating time.
+- **Outputs.** Current vs recommended schedule, projected energy / peak /
+  cost / production, per-state energy breakdown (heating / melting /
+  holding / idle / reheat / intercept / aux kWh, which sum to the total;
+  reheat is the cold-gap subset of heating slots), status
+  OPTIMAL | FEASIBLE | INFEASIBLE | TIMEOUT | BASELINE_UNAVAILABLE, and a
+  one-line explanation. History: `optimization_run` table (`source=PROJECTED`).
+- **Simplifications.** See docs/ASSUMPTIONS.md A21 (fixed charge, whole-slot
+  reheat, demand-charge simplification, first heat never cold).
+- **Limitations.** Short budgets trade optimality proofs for speed
+  (FEASIBLE = good plan, unproven); FEASIBLE at the deterministic budget is
+  reproducible, FEASIBLE at the wall clock is refused (TIMEOUT). Small
+  horizons prove OPTIMAL; full 24 h horizons may stop at FEASIBLE —
+  byte-identical across repeat solves (acceptance test 8). Projected
+  figures need plant validation; no intervention is simulated or verified
+  before Phase 5.
+
+## 7. Recommendation rules card (Phase 4B, human-in-the-loop only)
+
+- **Purpose.** Turn open anomalies, Phase-3 insights, process-efficiency
+  findings and the latest optimisation run into reviewable proposals —
+  nothing is executed.
+- **Rules (pure, `services/recommendations/engine.py`).** R-IDLE (avoid
+  unnecessary idle/holding), R-PROCESS (review process/scheduling on
+  energy-only deviations), R-INSPECT (inspect equipment on HEALTH_ONLY /
+  COINCIDENT, correlation wording kept), R-RESCHEDULE (shift flexible heats
+  to lower-tariff periods, deltas from the run), R-SEQUENCE (tighten heat
+  sequencing, breakdown-backed when available; gap delta includes holding +
+  idle + reheat), R-PRIORITISE (severity ranking across machines), R-NOPLAN
+  (surface an INFEASIBLE explanation).
+- **Comparability.** Every optimisation-backed recommendation (R-RESCHEDULE,
+  R-SEQUENCE) computes and stores `comparable: bool` plus
+  `comparability_reason`. Comparable requires the same production (within
+  `PRODUCTION_TOLERANCE = 1 %` from config) AND the same set of auxiliary
+  tasks (same aux energy in the breakdown). The API response and the
+  dashboard Optimization view show the flag prominently; when false, the
+  reason is displayed as "NOT COMPARABLE: <reason>".
+- **When not comparable.** All projected quantities (kWh, peak, INR deltas)
+  are set to null; the text never says "same production". Optionally, per-kg
+  projected energy (kWh/t) is shown for both sides, labelled PROJECTED.
+- **Fields.** Title, machine/process, severity, reason, evidence (source ids
+  + key numbers), constraints considered, proposed action, expected effect
+  (projected deltas with `evidence_class=PROJECTED`, cost only with a tariff
+  labelled ILLUSTRATIVE/ASSUMPTION; null when schedules are not comparable
+  or no quantity is defensible — never a guessed number), confidence
+  (LOW/MEDIUM/HIGH + the rule behind it), assumptions, source module/class
+  (DERIVED/PROJECTED), status (PENDING_REVIEW, or CONFLICT with both
+  reasons shown when a critical inspection overlaps an optimiser action —
+  never silently dropped), verification_status (always NOT_VERIFIED in
+  Phase 4), created_at. History: `recommendation` table (idempotent
+  `dedup_key`) + one `audit_event` row per acknowledge decision.
+- **Wording.** Projected/estimated only; fact-stating savings language is
+  banned and scanned by a unit test. Cost figures are illustrative
+  estimates requiring plant validation.

@@ -1,4 +1,4 @@
-# JouleMitra — Validation (Phases 2–3)
+# JouleMitra — Validation (Phases 2–4)
 
 Every number on this page comes from SIMULATED data (source class SIMULATED /
 DERIVED). It is a prototype result that requires plant validation and says
@@ -106,3 +106,48 @@ Notes:
   and `/machine-health/models` lists `statistical-v1` and `pbl-rul`. In the
   container no artifact path is configured, so `pbl-rul` shows
   available = false.
+
+## Phase 4 optimisation + recommendation verification (SIMULATED data)
+
+Verified 2026-09-27. `pytest`: 211 passed, 1 skipped (the optional PBL ONNX
+test, which needs PBL_TEST_ONNX_PATH), about 248 s. Every figure below is
+PROJECTED from the Phase-2 baseline coefficients and an ILLUSTRATIVE tariff
+(ASSUMPTION, not a real tariff order). None of it is a measured or verified
+saving.
+
+| Check | Result (SIMULATED/PROJECTED) |
+|---|---|
+| Test 2, TARIFF_SHIFT day (fixture), same production 3375 kg | Comparable. Energy 1482.1 → 1450.9 kWh (−2.1 %); cost INR 11716 → 9999 (−14.7 %, illustrative tariff); peak 142.6 kW both sides |
+| Test-2 breakdown current → recommended (kWh) | heating 370.1 → 370.1; melting 828.2 → 828.2; holding 137.1 → 137.1; idle 113.0 → 115.5; reheat 33.6 → 0.0. The energy delta is reheat avoided by closing one cold gap. Nothing else changes. |
+| Live run (Docker stack, fresh 7-day NORMAL + TARIFF_SHIFT day, seed 1) | FEASIBLE and comparable; energy 1798.9 → 1798.9 kWh (no cold gap to avoid); cost INR 13978 → 12497 (−10.6 %, from time-of-use placement only); peak 142.5 kW both sides |
+| Reproducibility | Full 24 h case ×3 byte-identical (test); live run ×2 identical schedule and metrics |
+| Non-comparable run (production 3375 vs 1500 kg) | comparable = false with reason. Recommendation quantities null; kWh/t shown instead |
+| Recommendations (live) | 2 generated (R-IDLE: quantity null; R-RESCHEDULE: projected INR −1481, kWh 0). All PENDING_REVIEW, NOT_VERIFIED. No banned phrases. Accept → ACCEPTED but still NOT_VERIFIED; second decision → 409 |
+
+Earlier drafts of the optimizer reported a −10 % projected energy reduction.
+That figure was an artifact: the current schedule was compared at its
+observed heat durations against idealised planned durations. It was
+corrected before this commit, so the optimizer now moves heats in time but
+never changes a heat's intrinsic durations, and reheat is decided by the same
+rule on both sides. Energy can only fall by avoiding reheat, not by
+shortening heats. Tariff-driven cost shifts are the main projected lever.
+What the automated suite checks (no live numbers invented here):
+
+- Optimiser acceptance (`tests/integration/test_phase4a.py`): feasible +
+  independently validated schedules; tariff-shift day cheaper at equal
+  production; INFEASIBLE explanations name the group; peak cap hard;
+  reproducibility (small OPTIMAL case + full-horizon x3 byte-identical);
+  BASELINE_UNAVAILABLE / no-tariff paths invent no price; per-state energy
+  breakdown sums to the total.
+- Recommendations (`tests/unit/test_recommendations.py`,
+  `tests/api/test_recommendations_api.py`): complete fields per rule;
+  inspection/process rows null quantity; banned-phrase scan over all text;
+  idempotent generation; conflict flagged with both reasons kept;
+  acknowledge 404/409; accepted stays NOT_VERIFIED with an audit row;
+  generation with health unavailable or an INFEASIBLE optimiser (remaining
+  sources + surfaced explanation).
+
+ASSUMPTIONS entries: A21 (optimiser simplifications), A22 (illustrative
+tariff), A23 (deterministic budget + wall-clock safety net), A24
+(recommendation rules, wording, human-in-the-loop), A25 (energy breakdown
+semantics).

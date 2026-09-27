@@ -93,3 +93,45 @@ def get_health_models() -> dict:
 
 def get_insights(start_iso: str, end_iso: str) -> dict:
     return _get("/insights", {"start": start_iso, "end": end_iso})
+
+
+def get_process_efficiency(start_iso: str, end_iso: str,
+                           machine_id: str | None = None) -> dict:
+    params = {"start": start_iso, "end": end_iso}
+    if machine_id:
+        params["machine_id"] = machine_id
+    return _get("/process/efficiency", params)
+
+
+def run_optimization(payload: dict) -> dict:
+    return _post("/optimization/run", payload, timeout=120.0)
+
+
+def get_optimization_schedule(machine_id: str | None = None,
+                              run_id: str | None = None) -> dict:
+    params: dict = {}
+    if run_id:
+        params["id"] = run_id
+    if machine_id:
+        params["machine_id"] = machine_id
+    return _get("/optimization/schedule", params or None)
+
+
+def generate_recommendations(start_iso: str, end_iso: str) -> dict:
+    return _post("/recommendations/generate",
+                 {"start": start_iso, "end": end_iso}, timeout=120.0)
+
+
+def get_recommendations(machine_id: str | None = None,
+                        status: str | None = None) -> dict:
+    params: dict = {}
+    if machine_id:
+        params["machine_id"] = machine_id
+    if status:
+        params["status"] = status
+    return _get("/recommendations", params or None)
+
+
+def acknowledge_recommendation(rec_id: str, decision: str, note: str = "") -> dict:
+    return _post(f"/recommendations/{rec_id}/acknowledge",
+                 {"decision": decision, "note": note})

@@ -61,14 +61,12 @@ def test_all_records_simulated_source():
 
 def test_non_normal_scenario_raises():
     # Phase 2: IDLE_WASTE/HIGH_LOAD/PRODUCTION_SURGE are implemented in the
-    # factory; Phase 3A adds EQUIPMENT_DEGRADATION; only Phase-4+ scenarios
-    # still raise NotImplementedError.
-    with pytest.raises(NotImplementedError, match="Phase 4"):
-        SimulatedFactory(DEFAULT_MACHINES, scenario="TARIFF_SHIFT")
-    with pytest.raises(NotImplementedError, match="Phase 4"):
+    # factory; Phase 3A adds EQUIPMENT_DEGRADATION; Phase 4A adds
+    # TARIFF_SHIFT; only COMBINED_ANOMALY still raises NotImplementedError.
+    with pytest.raises(NotImplementedError, match="future work"):
         SimulatedFactory(DEFAULT_MACHINES, scenario="COMBINED_ANOMALY")
-    with pytest.raises(NotImplementedError, match="Phase 4"):
-        apply_fault([], Scenario.TARIFF_SHIFT)
+    with pytest.raises(NotImplementedError, match="future work"):
+        apply_fault([], Scenario.COMBINED_ANOMALY)
     with pytest.raises(NotImplementedError, match="SimulatedFactory"):
         apply_fault([], Scenario.HIGH_LOAD)
     assert apply_fault([{"a": 1}], Scenario.NORMAL) == [{"a": 1}]
