@@ -48,6 +48,20 @@ def test_bad_power_factor(pf):
 def test_bad_energy_decreasing():
     r = validate_telemetry(ts=ts_ok(), now=NOW, energy_kwh=9.0, last_energy_kwh=10.0)
     assert r.quality == "BAD" and any("decreasing" in x for x in r.reasons)
+    # In order (newer than the last stored reading) with a lower counter: still BAD.
+    r = validate_telemetry(ts=ts_ok(), now=NOW, energy_kwh=9.0, last_energy_kwh=10.0,
+                           last_ts=ts_ok() - timedelta(seconds=60))
+    assert r.quality == "BAD"
+
+
+def test_late_older_reading_with_lower_counter_is_suspect_not_bad():
+    # An older reading arriving late (MQTT redelivery, edge buffer flush) naturally
+    # carries a lower cumulative counter: out-of-order SUSPECT, never BAD.
+    r = validate_telemetry(ts=ts_ok() - timedelta(minutes=10), now=NOW, energy_kwh=9.0,
+                           last_energy_kwh=10.0, last_ts=ts_ok())
+    assert r.quality == "SUSPECT"
+    assert not any("decreasing" in x for x in r.reasons)
+    assert any("out-of-order" in x.lower() or "out of order" in x.lower() for x in r.reasons)
 
 
 def test_bad_future_ts():

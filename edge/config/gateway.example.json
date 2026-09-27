@@ -1,0 +1,14 @@
+{
+  "_comment": "Edge gateway config. Paths are relative to base_dir. MQTT credentials come from MQTT_USERNAME / MQTT_PASSWORD env vars, never this file.",
+  "base_dir": ".",
+  "api_base": "http://localhost:8000",
+  "buffer_path": "edge_buffer.db",
+  "status_path": "edge_status.json",
+  "loop_interval_s": 1.0,
+  "batch_size": 200,
+  "mqtt": {"host": "localhost", "port": 1883, "client_id": "jm-gateway-01"},
+  "modbus": [
+    {"machine_id": "compressor-01", "host": "localhost", "port": 5020, "device_id": 1,
+     "map": "edge/config/energy_meter_map.json", "source": "SIMULATED", "poll_interval_s": 5}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "_comment": "Example 3-phase energy-meter holding-register map (ILLUSTRATIVE layout, not a specific vendor). Confirm addresses, scaling and word order against the real meter's manual before use.",
+  "registers": [
+    {"field": "voltage_v", "address": 0, "dtype": "uint16", "scale": 0.1, "unit": "V", "min": 0, "max": 600, "invalid": [65535]},
+    {"field": "current_a", "address": 1, "dtype": "uint16", "scale": 0.01, "unit": "A", "min": 0, "max": 600, "invalid": [65535]},
+    {"field": "power_kw", "address": 2, "dtype": "int32", "word_order": "big", "scale": 0.001, "unit": "kW (register in W)", "min": -2000, "max": 2000, "invalid": [2147483647]},
+    {"field": "power_factor", "address": 4, "dtype": "int16", "scale": 0.001, "unit": "-", "min": 0, "max": 1, "invalid": [32767]},
+    {"field": "energy_kwh", "address": 5, "dtype": "uint32", "word_order": "little", "scale": 0.001, "unit": "kWh (register in Wh, low word first)", "min": 0, "max": 4000000, "invalid": [4294967295]},
+    {"field": "reactive_power_kvar", "address": 7, "dtype": "float32", "word_order": "big", "unit": "kvar", "min": -2000, "max": 2000}
+  ]
+}

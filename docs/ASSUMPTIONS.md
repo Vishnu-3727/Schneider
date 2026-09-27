@@ -400,3 +400,46 @@ labelled SIMULATED/ASSUMPTION and every simulator record carries
   NOT_COMPARABLE and INSUFFICIENT_DATA.
 - IMPACT: Parameter values are illustrative, not measured furnace
   behaviour. Every figure produced with them is SIMULATED.
+## A30 — Edge validation split and canonical boundary (Phase 6)
+- ASSUMPTION: The edge does structural checks only (known canonical fields,
+  numeric and finite values, tz-aware timestamps, a valid source class, the
+  topic/payload machine match, register range and sentinels). Semantic
+  quality (impossible values, stale, out-of-order, spikes, duplicates) stays
+  in the backend's single validator.
+- WHY: One source of truth for data quality, identical for the simulator,
+  MQTT and Modbus paths. The analytics never see protocol structures.
+- IMPACT: A plausible but wrong reading from a real device is judged by the
+  same backend rules as any other source.
+
+## A31 — Late readings and the cumulative-energy rule (Phase 6 fix)
+- ASSUMPTION: "cumulative energy decreasing" (BAD) now applies only to
+  readings newer than the latest stored one. An older reading that arrives
+  late (MQTT redelivery, an edge buffer flush) is flagged out-of-order
+  (SUSPECT) instead.
+- WHY: Found by the Phase 6 edge tests. A late older reading naturally
+  carries a lower counter, and the Phase 1 rule marked it BAD by arrival
+  order.
+- IMPACT: Late data is kept as SUSPECT, not condemned. A counter that truly
+  goes backwards in time is still BAD.
+
+## A32 — MQTT delivery semantics and dev broker (Phase 6)
+- ASSUMPTION: QoS 1 with a persistent session (at-least-once), with
+  duplicates absorbed by the (kind, machine, ts) dedup at the edge and the
+  (machine, ts) uniqueness at the backend. Retained messages are replays
+  under the same dedup. The docker-compose broker allows anonymous
+  localhost clients (DEV ONLY).
+- WHY: At-least-once plus idempotent ingest is the standard IIoT pattern.
+  Exactly-once is not needed.
+- IMPACT: A plant deployment must enable password_file + TLS
+  (docs/DEPLOYMENT.md checklist).
+
+## A33 — Modbus register map and simulated meter (Phase 6, ILLUSTRATIVE)
+- ASSUMPTION: `edge/config/energy_meter_map.json` is an illustrative
+  layout, not a specific vendor's: V ×0.1, A ×0.01, W int32 → kW, PF ×0.001,
+  Wh uint32 low-word-first → kWh, kvar float32. The simulated meter serves
+  the compressor model's values through a stdlib Modbus TCP server and is
+  tagged SIMULATED.
+- WHY: Exercises every decoding path (scaling, signed values, both word
+  orders, float32, sentinels) through the real protocol.
+- IMPACT: A real meter needs its manual's table, confirmed on site against
+  a reference reading.

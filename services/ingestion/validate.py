@@ -118,7 +118,12 @@ def validate_telemetry(
     suspect: list[str] = []
     bad += check_impossible_telemetry(voltage_v, current_a, power_kw, power_factor)
     bad += check_future_ts(ts, now, clock_skew_s)
-    bad += check_energy_decreasing(energy_kwh, last_energy_kwh)
+    # The counter must not fall over TIME. Compare only an in-order reading
+    # with the latest stored one: a late-arriving older reading (MQTT
+    # redelivery, an edge buffer flush) legitimately carries a lower counter
+    # and is flagged SUSPECT as out-of-order below, not BAD.
+    if last_ts is None or ts > last_ts:
+        bad += check_energy_decreasing(energy_kwh, last_energy_kwh)
     if not skip_stale:
         suspect += check_stale_ts(ts, now, stale_after_s)
     suspect += check_out_of_order(ts, last_ts)

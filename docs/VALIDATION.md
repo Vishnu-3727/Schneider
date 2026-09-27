@@ -192,3 +192,41 @@ CO2 figures are **estimates based on provisional emission-factor data, not for e
     missing factor.
   - Only a VERIFIED saving is converted to cost or CO2.
   - The state-hour counterfactual trap.
+## Phase 6 industrial connectivity verification (SIMULATED devices)
+
+Verified 2026-09-27. `pytest`: 268 passed, 1 skipped (the optional PBL
+ONNX test), about 338 s. The edge tests use a real Mosquitto broker
+(docker compose), the real Modbus TCP protocol (pymodbus client against the
+independent stdlib server) and the real backend on the test database.
+
+| Requirement | How it was checked | Result |
+|---|---|---|
+| MQTT → same pipeline as direct HTTP | identical records via both paths | stored rows identical (analytics cannot tell them apart) |
+| Malformed payload / unknown machine | broken JSON; topic for `ghost-99` | both dead-lettered with reason (malformed; API 404), others delivered |
+| Duplicate message | same reading published twice | one row |
+| Stale message | reading 2 h old on the live path | stored SUSPECT (not dropped, not BAD) |
+| Retained / replayed message | new gateway subscription receives retained value | counted as retained, not re-sent |
+| Broker unavailable | gateway pointed at a closed port | keeps running, `connected=false` |
+| Broker restart / reconnect | `docker compose restart mqtt` mid-session | disconnect seen, reconnected, next message delivered |
+| Modbus mapping, unit conversion, word order | known IEEE-754 vector 123.456 as ABCD / CDAB / BADC; int16/int32/uint32 | decoded exactly; wrong word order gives a different value |
+| Invalid register | 0xFFFF sentinel, PF 1.5, float NaN, register not read | field null plus an issue, never a number |
+| Timeout / device unavailable / reconnect | slow server, server stopped, server restarted | TIMEOUT / UNAVAILABLE with backoff, then CONNECTED |
+| API unavailable | backend unreachable, gateway restarted mid-outage | nothing discarded; delivered in order when the API returned |
+
+Live demo (processes, Docker stack): simulated Modbus meter
+(compressor-01) → gateway ← MQTT device simulator (furnace-01, pump-01).
+
+- The backend was stopped for about 26 s mid-run. The gateway reported
+  `API_UNAVAILABLE` and buffered 5 readings, then delivered them when the
+  API returned.
+- Final: 68 records delivered (48 MQTT telemetry, 2 production, 18 Modbus),
+  0 pending, 0 dead-letter, all GOOD, all tagged SIMULATED.
+
+Defects found and fixed during Phase 6:
+
+1. The backend marked a late-arriving older reading BAD (see ASSUMPTIONS
+   A31).
+2. The gateway status file could be read half-written; it is now written
+   atomically.
+3. docker-compose still set `NON_PRODUCTION_TYPES: pump`, so the compressor
+   showed NO_PRODUCTION inside Docker; it is now `pump,compressor`.

@@ -8,3 +8,8 @@ data/simulated/*.csv
 !data/simulated/.gitkeep
 *.db
 .streamlit/
+
+# edge gateway runtime state
+edge_buffer.db*
+edge_status.json
+edge_status.json.tmp

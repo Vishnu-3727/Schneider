@@ -1,4 +1,4 @@
-# JouleMitra — Phase 5 (interventions → counterfactual savings verification)
+# JouleMitra — Phase 6 (industrial connectivity: MQTT / Modbus → edge gateway → same pipeline)
 
 Authoritative spec: `docs/spec/MASTER_SPEC.md`. Phase 1 committed (de875e9);
 Phase 2 scope: `docs/IMPLEMENTATION_PLAN.md` Phase 2 section. Simulator
@@ -6,7 +6,7 @@ constants: `docs/ASSUMPTIONS.md`. Model cards: `docs/ML_MODELS.md`
 (baseline v1-linear; health `statistical-v1`; external `pbl-rul` adapter;
 CP-SAT scheduler + recommendation rules). Scenarios: `docs/SIMULATION.md`.
 Latest verification numbers: see docs/VALIDATION.md (Phases 2–5, all on
-SIMULATED data). Phase 6 (MQTT / edge / Modbus) has not begun.
+SIMULATED data). Phase 7 (hardware / CAD artifacts) has not begun.
 
 Phase 3 status: health interface (`MachineHealthModel` + registry),
 native `statistical-v1` (per-machine, state-conditioned median + MAD
@@ -50,6 +50,16 @@ provenance). The simulator's chronic-holding waste and the REDUCE_IDLE /
 REPAIR interventions (effectiveness, compliance, rebound) produce SUCCESS,
 NO_EFFECT, WORSE, NOT_COMPARABLE and INSUFFICIENT_DATA from physics, not
 from labels. Dashboard: Verification view.
+
+Phase 6 status: `edge/` gateway (docs/DEPLOYMENT.md). MQTT (paho) and
+Modbus TCP (pymodbus client, register maps as data with word/byte order,
+scaling, sentinels, ranges) adapters produce canonical telemetry only. A
+SQLite store-and-forward buffer delivers to the unchanged `/telemetry` and
+`/production` API (dead-letter for malformed or rejected records, nothing
+silently dropped, survives restarts and API outages). Mosquitto is in
+docker compose. The device simulator publishes the same SimulatedFactory
+data over MQTT and serves a simulated Modbus meter, so the simulator path
+and the device path share one pipeline and identical analytics.
 
 ## Prerequisites
 
