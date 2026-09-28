@@ -6,7 +6,8 @@ constants: `docs/ASSUMPTIONS.md`. Model cards: `docs/ML_MODELS.md`
 (baseline v1-linear; health `statistical-v1`; external `pbl-rul` adapter;
 CP-SAT scheduler + recommendation rules). Scenarios: `docs/SIMULATION.md`.
 Latest verification numbers: see docs/VALIDATION.md (Phases 2–5, all on
-SIMULATED data). Phase 7 (hardware / CAD artifacts) has not begun.
+SIMULATED data). Phase 7 wiring/CAD reference docs exist (docs/deployment/, cad/);
+ESP32/RPi firmware, deploy units and physical hardware are not done.
 
 Phase 3 status: health interface (`MachineHealthModel` + registry),
 native `statistical-v1` (per-machine, state-conditioned median + MAD

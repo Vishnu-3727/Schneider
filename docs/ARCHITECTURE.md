@@ -143,8 +143,8 @@ hard-coded.
 Every important quantitative value carries one source class, stored alongside
 the value and shown in UI/API:
 
-- **MEASURED** — from a real sensor through the gateway (only after Phase 7
-  hardware; nothing is MEASURED before that).
+- **MEASURED** — from a real sensor through the gateway (Phase 7 wiring/CAD
+  reference docs exist; no firmware/hardware yet, so nothing is MEASURED).
 - **SIMULATED** — from `apps/simulator/` or `edge/device_simulator/`.
   Dashboard/API labels it "Simulation".
 - **DERIVED** — computed from stored values (SEC, deviations, smoothed
