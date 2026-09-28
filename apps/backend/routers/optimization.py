@@ -138,7 +138,9 @@ def _tariff_periods(db: Session, site_id: str, horizon_end: datetime):
             end_h=r[2].hour + r[2].minute / 60.0,
             energy_inr_per_kwh=float(r[3]),
             demand_inr_per_kw=float(r[4]) if r[4] is not None else None))
-    info = [{"period": r[0], "rate": float(r[3]), "source_class": r[6]} for r in rows
+    info = [{"period": r[0], "rate": float(r[3]), "source_class": r[6],
+             "start_h": r[1].hour + r[1].minute / 60.0,
+             "end_h": r[2].hour + r[2].minute / 60.0} for r in rows
             if r[5] == latest]
     return periods, info
 

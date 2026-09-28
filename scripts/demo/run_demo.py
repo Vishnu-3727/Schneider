@@ -10,8 +10,11 @@ Usage (Postgres up, backend running on the dev DB):
 
 Truncates every analytics table first (same set as tests/conftest.py). All data
 is SIMULATED; the intervention changes simulator physics from the applied time
-on (effectiveness / rebound), no outcome is injected. Every printed figure is
-read from an API response.
+on (effectiveness / rebound), no outcome is injected. The compressor and pump
+run on the same timeline with idle waste in the last 24 h, so the console
+(/console/) has a detected anomaly, health for every machine and open
+recommendations alongside the verified saving. Every printed figure is read
+from an API response.
 """
 
 from __future__ import annotations
@@ -67,6 +70,14 @@ def ingest(api: httpx.Client, end: datetime, seed: int, shifted: bool) -> None:
                                          "effectiveness": 1.0, "rebound": 0.15},
                            **extra)
     tel, prod = fac.run()
+    # Rest of the plant on the same timeline, so every console screen has a
+    # story: compressor idle waste in the last 24 h (pump stays the control).
+    rest = SimulatedFactory([MachineSpec("compressor-01", "compressor", 30.0),
+                             MachineSpec("pump-01", "pump", 15.0)],
+                            scenario="IDLE_WASTE", hours=BASE_H + POST_H, step_s=300, seed=seed,
+                            end=end, scenario_start_h=BASE_H + POST_H - 24, scenario_duration_h=24)
+    rtel, rprod = rest.run()
+    tel, prod = tel + rtel, prod + rprod
     for path, recs in (("/telemetry?backfill=true", tel), ("/production?backfill=true", prod)):
         for i in range(0, len(recs), 1000):
             call(api, "POST", path, json={"records": recs[i:i + 1000]})
@@ -123,7 +134,7 @@ def main() -> int:
                     help="shift operating conditions after the change (expect NOT_COMPARABLE)")
     a = ap.parse_args()
 
-    end = datetime.now(TZ).replace(minute=0, second=0, microsecond=0)
+    end = datetime.now(TZ).replace(second=0, microsecond=0)
     start = end - timedelta(hours=BASE_H + POST_H)
     applied = end - timedelta(hours=POST_H)
     ref_end = start + timedelta(days=5)  # reference window, then 2 pre-change days to score
@@ -134,24 +145,21 @@ def main() -> int:
         ingest(api, end, a.seed, a.shifted)
 
         fit = call(api, "POST", "/energy/baseline/fit", json=win(start, ref_end))
-        det = call(api, "POST", "/energy/anomalies/detect", json=win(ref_end, applied))
+        call(api, "POST", "/energy/anomalies/detect", json=win(ref_end, applied))
+        call(api, "POST", "/energy/anomalies/detect", json=win(end - timedelta(days=1), end))
         stored = call(api, "GET", "/energy/anomalies").get("anomalies", [])
-        rules = sorted({e.get("rule_id") for e in stored if e.get("rule_id")})
+        by_m = sorted({f"{e.get('machine_id')}:{e.get('rule_id')}" for e in stored})
         n_fit = sum(1 for f in fit.get("fits", []) if f.get("status") == "OK")
-        print(f"[2] baseline fitted ({n_fit} OK fits); anomaly detection -> "
-              f"created {det.get('created')}, already_existing {det.get('already_existing')}, "
-              f"stored {len(stored)} events (rules: {rules or 'none'}). "
-              f"0 is expected: the chronic idle waste runs inside the reference window, "
-              f"so the baseline treats it as normal.")
+        print(f"[2] baseline fitted ({n_fit} OK fits); {len(stored)} anomaly events "
+              f"({by_m or 'none'}). The furnace's chronic idle waste sits inside its "
+              f"reference window, so the baseline treats it as normal; the compressor's "
+              f"waste in the last 24 h is new and is caught.")
 
         call(api, "POST", "/machine-health/fit", json=win(start, ref_end))
-        call(api, "POST", "/machine-health/score", json=win(ref_end, applied))
-        insights = call(api, "GET", "/insights",
-                        params=win(ref_end, applied)).get("insights", [])
+        call(api, "POST", "/machine-health/score", json=win(ref_end, end))
+        insights = call(api, "GET", "/insights", params=win(ref_end, end)).get("insights", [])
         cats = sorted({i.get("category") for i in insights if i.get("category")})
-        print(f"[3] health scored; insights: {len(insights)} "
-              f"(categories: {cats or 'none'}). "
-              f"Empty follows from [2]: no energy events to correlate.")
+        print(f"[3] health scored; insights: {len(insights)} (categories: {cats or 'none'})")
 
         opt = call(api, "POST", "/optimization/run", json={
             "machine_id": MACHINE, "date": (applied - timedelta(days=1)).date().isoformat()})
@@ -170,6 +178,9 @@ def main() -> int:
         v = call(api, "POST", f"/interventions/{iv['id']}/verify",
                  json=win(applied, end))["verification"]
         print(f"[6] intervention {iv['id']} applied {applied:%Y-%m-%d %H:%M}, verified")
+
+        new = call(api, "POST", "/recommendations/generate", json=win(end - timedelta(days=1), end))
+        print(f"[7] recommendations for the last 24 h: {new.get('created', new)} awaiting review")
 
     report(v)
     if v.get("outcome") == "NOT_COMPARABLE":

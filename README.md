@@ -109,6 +109,7 @@ docker compose up -d db
 # health -> insights -> optimise -> recommend -> approve -> intervene -> verify
 .venv\Scripts\python scripts/demo/run_demo.py            # REDUCE_IDLE, proves a real saving verifies (VERIFIED)
 .venv\Scripts\python scripts/demo/run_demo.py --shifted  # shifted operating conditions, proves the guardrail holds (NOT_COMPARABLE)
+powershell -ExecutionPolicy Bypass -File scripts\demo\demo.ps1 [-Shifted] [-Detection] [-Dashboard]  # one-click: db+mqtt, backend, demo
 ```
 
 Scenarios `NORMAL`, `IDLE_WASTE`, `HIGH_LOAD`, `PRODUCTION_SURGE` are

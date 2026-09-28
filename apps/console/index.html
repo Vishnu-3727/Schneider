@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JouleMitra Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=block" rel="stylesheet">
+<link rel="stylesheet" href="/console/tokens.css">
+<link rel="stylesheet" href="/console/console.css">
+<script src="/console-vendor/plotly.min.js"></script>
+<script src="/console/console.js" defer></script>
+</head>
+<body>
+<div class="viewport">
+<div class="stage" id="stage">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>JouleMitra</div>
+    <nav class="flow" aria-label="The JouleMitra loop">
+      <a class="nav-step" href="#plant" data-screen="plant"><b>1</b>Plant</a>
+      <a class="nav-step" href="#detect" data-screen="detect"><b>2</b>Detect</a>
+      <a class="nav-step" href="#health" data-screen="health"><b>3</b>Health</a>
+      <a class="nav-step" href="#optimise" data-screen="optimise"><b>4</b>Optimise</a>
+      <a class="nav-step" href="#act" data-screen="act"><b>5</b>Act</a>
+      <a class="nav-step" href="#impact" data-screen="impact"><b>6</b>Prove</a>
+      <a class="nav-step" href="#payback" data-screen="payback"><b>7</b>Scale</a>
+    </nav>
+    <p class="legend" aria-label="Colour key">
+      <span class="k measured">measured</span><span class="k projected">projected</span><span class="k verified">verified</span>
+    </p>
+  </header>
+
+  <main class="screens">
+    <section class="screen" id="screen-plant" aria-label="Plant, live">
+      <div class="screen-head">
+        <div><h1>Plant, live</h1><p class="sub">Every machine now: what it draws, what it made, and what needs a look.</p></div>
+        <div class="chips" id="chips-plant"></div>
+      </div>
+      <div class="screen-body">
+        <div class="kpi-row" id="plant-kpis"></div>
+        <div class="attn"><h2>Needs attention</h2><ul class="attn-list" id="plant-attn"></ul></div>
+        <div id="plant-tiles"></div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-detect" aria-label="Waste, caught early">
+      <div class="screen-head">
+        <div><h1>Waste, caught early</h1><p class="sub">Actual energy against what the machine should use for the work it did.</p></div>
+        <div class="chips" id="chips-detect"></div>
+      </div>
+      <div class="screen-body">
+        <div class="panel sheet"><h2 id="detect-title">Actual vs expected</h2><p class="lead" id="detect-sum"></p><div class="chart" id="detect-chart"></div></div>
+        <div class="panel"><h2>Alerts</h2><div id="detect-alerts-list"></div></div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-health" aria-label="Machine health">
+      <div class="screen-head">
+        <div><h1>Machine health</h1><p class="sub">How far each machine drifts from its own normal, and where wear and waste meet.</p></div>
+        <div class="chips" id="chips-health"></div>
+      </div>
+      <div class="screen-body">
+        <div class="panel sheet"><h2>Health score, out of 100</h2><div id="health-list"></div></div>
+        <div class="panel"><h2>Energy and health together</h2><div id="insights-list"></div></div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-optimise" aria-label="A cheaper schedule">
+      <div class="screen-head">
+        <div><h1>A cheaper schedule</h1><p class="sub">Same heats, same output, started at better hours. A plan, not yet done.</p></div>
+        <div class="chips" id="chips-optimise"></div>
+      </div>
+      <div class="screen-body">
+        <div class="sheet ribbon-wrap"><div class="ribbon-head"><h2 id="ribbon-title">The furnace's last 24 hours: where the rupees went</h2><p class="ribbon-key"><span class="k s-heating"></span>heating<span class="k s-melting"></span>melting<span class="k s-holding"></span>holding, no pour<span class="k s-idle"></span>idle</p></div><div class="ribbon" id="ribbon"></div><div class="ribbon-axis" id="ribbon-axis"></div><p class="ribbon-sum" id="ribbon-sum"></p></div>
+        <div class="panel"><h2 id="opt-title">Current vs recommended</h2><div class="tariff-strip" id="opt-tariff"></div><div class="chart" id="opt-chart"></div><p class="note" id="opt-explain"></p></div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-act" aria-label="From advice to action">
+      <div class="screen-head">
+        <div><h1>From advice to action</h1><p class="sub">One recommendation followed from suggestion to proof. A person approves every step.</p></div>
+        <div class="chips" id="chips-act"></div>
+      </div>
+      <div class="screen-body">
+        <div class="stepper" id="act-stepper"></div>
+        <div id="act-cols">
+          <div class="panel sheet rec-card"><h2>Recommendation</h2><div id="act-rec"></div></div>
+          <div class="panel"><h2>Result of the change</h2><div id="act-list"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-impact" aria-label="Savings, proven">
+      <div class="screen-head">
+        <div><h1>Savings, proven</h1><p class="sub">Measured after the change and checked against what would have happened anyway.</p></div>
+        <div class="chips" id="chips-impact"></div>
+      </div>
+      <div class="screen-body">
+        <div class="impact-hero sheet" id="impact-hero"></div>
+        <div class="impact-cards" id="impact-cards"></div>
+        <div class="impact-lower">
+          <div class="panel"><h2 id="impact-story-title">How we know it is real</h2><div id="guardrail"></div></div>
+          <div class="panel"><h2 id="impact-chart-title">Energy in the measured period</h2><p class="note" id="impact-chart-note">Expected is what the furnace would have used without the change, for the same output. The whisker is the error band.</p><div class="chart" id="impact-chart"></div></div>
+        </div>
+      </div>
+    </section>
+    <section class="screen" id="screen-payback" aria-label="What it pays back">
+      <div class="screen-head">
+        <div><h1>What it pays back</h1><p class="sub">The verified saving, run through your own costs. Move the sliders.</p></div>
+        <div class="chips" id="chips-payback"></div>
+      </div>
+      <div class="screen-body">
+        <div class="panel" id="pb-inputs"></div>
+        <div class="sheet" id="pb-out"></div>
+      </div>
+    </section>
+  </main>
+  <aside class="trail" id="trail" aria-label="Where this number comes from" aria-live="polite"></aside>
+  <p class="keys" aria-hidden="true">← → to move between screens · click an underlined number to see where it comes from</p>
+</div>
+</div>
+</body>
+</html>

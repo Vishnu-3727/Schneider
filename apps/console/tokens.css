@@ -1,0 +1,67 @@
+/* JouleMitra Console — design tokens (single source of truth).
+ * Colour encodes provenance: molten = measured energy / waste,
+ * blueprint = projected plan, green = verified saving. Nothing else is coloured. */
+:root {
+  --color-surround: oklch(86% 0.006 120);   /* letterbox around the stage */
+  --color-paper: oklch(96% 0.005 110);      /* chalk */
+  --color-sheet: oklch(99.4% 0.002 110);    /* the one raised sheet per screen */
+  --color-ink: oklch(24% 0.025 255);        /* graphite */
+  --color-ink-2: oklch(45% 0.02 250);       /* steel */
+  --color-ink-3: oklch(60% 0.015 250);
+  --color-rule: oklch(87% 0.008 110);
+  --color-accent: oklch(64% 0.19 42);       /* molten: measured energy, waste */
+  --color-accent-soft: oklch(93% 0.045 55);
+  --color-projected: oklch(52% 0.17 265);   /* blueprint: projected plans */
+  --color-projected-soft: oklch(93% 0.035 265);
+  --color-verified: oklch(50% 0.11 160);    /* verified savings only */
+  --color-verified-soft: oklch(93% 0.04 160);
+  --color-warn: oklch(52% 0.19 27);         /* critical */
+
+  --font-display: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --font-numerals: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --wdth-display: 112;   /* expanded for titles and key numbers */
+  --wdth-label: 88;      /* slightly condensed for small labels */
+
+  /* The stage is a fixed 1600x900 (16:9) canvas scaled to fit the window,
+   * so the browser and the PPT slide show the same composition. */
+  --stage-w: 1600px;
+  --stage-h: 900px;
+  --root-size: 16px;
+
+  --text-hero: 8.5rem;
+  --text-hero-s: 5rem;
+  --text-kpi: 2.75rem;
+  --text-kpi-s: 2.25rem;
+  --text-title: 2.5rem;
+  --text-lead: 1.3rem;
+  --text-body: 1rem;
+  --text-label: 0.8125rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-9: 2.25rem;
+  --space-10: 2.5rem;
+  --space-11: 2.75rem;
+  --space-12: 3rem;
+
+  --radius-sheet: 0.375rem;
+  --radius-panel: 0.375rem;
+  --radius-pill: 999px;
+  --border-thin: 1px;
+  --ring-width: 2px;
+  --opacity-pressed: 0.75;
+  --rail-w: 0px;
+  --title-tracking: -0.015em;
+
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --anim-fade: fade 180ms var(--ease-out);
+}
