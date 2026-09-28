@@ -1,4 +1,4 @@
-# JouleMitra — Phase 6 (industrial connectivity: MQTT / Modbus → edge gateway → same pipeline)
+# JouleMitra — software complete through Phase 6 (Phase 7 = deployment/wiring documentation only)
 
 Authoritative spec: `docs/spec/MASTER_SPEC.md`. Phase 1 committed (de875e9);
 Phase 2 scope: `docs/IMPLEMENTATION_PLAN.md` Phase 2 section. Simulator
@@ -62,6 +62,15 @@ docker compose. The device simulator publishes the same SimulatedFactory
 data over MQTT and serves a simulated Modbus meter, so the simulator path
 and the device path share one pipeline and identical analytics.
 
+## Scope
+
+All data is SIMULATED. The architecture is frozen: physical hardware,
+ESP32 firmware, Raspberry Pi service units and CAD drawings are
+intentionally NOT built. `docs/deployment/` shows how the same software
+connects to a real meter via RS-485 → Modbus TCP converter → edge
+gateway. Monitoring and human-in-the-loop only — no control of
+furnaces, motors or safety systems.
+
 ## Prerequisites
 
 - Python 3.11, Docker (running), PostgreSQL 16 via compose.
@@ -91,6 +100,15 @@ docker compose up -d db
 .venv\Scripts\python -m streamlit run apps/dashboard/app.py
 # Energy + Alerts pages: actual vs expected, SEC trend, baseline quality,
 # anomaly list with acknowledge (all DERIVED from SIMULATED data)
+```
+
+### End-to-end demo
+
+```powershell
+# Full story through the API: ingest SIMULATED history -> baseline -> detect ->
+# health -> insights -> optimise -> recommend -> approve -> intervene -> verify
+.venv\Scripts\python scripts/demo/run_demo.py            # REDUCE_IDLE, proves a real saving verifies (VERIFIED)
+.venv\Scripts\python scripts/demo/run_demo.py --shifted  # shifted operating conditions, proves the guardrail holds (NOT_COMPARABLE)
 ```
 
 Scenarios `NORMAL`, `IDLE_WASTE`, `HIGH_LOAD`, `PRODUCTION_SURGE` are

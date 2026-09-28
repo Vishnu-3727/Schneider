@@ -230,3 +230,45 @@ Defects found and fixed during Phase 6:
    atomically.
 3. docker-compose still set `NON_PRODUCTION_TYPES: pump`, so the compressor
    showed NO_PRODUCTION inside Docker; it is now `pump,compressor`.
+
+## Final integration (2026-09-28)
+
+Verified 2026-09-28. `pytest`: 268 passed, 1 skipped (the optional PBL
+ONNX test), about 333 s, with the test-database Postgres and Mosquitto up
+from docker compose. End-to-end demo driver `scripts/demo/run_demo.py`
+against the local backend on the dev database (every figure from an API
+response, all data SIMULATED):
+
+Default run (`run_demo.py`, REDUCE_IDLE, seed 1):
+
+- `[2] baseline fitted (1 OK fits); anomaly detection -> created 0,
+  already_existing 0, stored 0 events (rules: none). 0 is expected: the
+  chronic idle waste runs inside the reference window, so the baseline
+  treats it as normal.`
+- `[3] health scored; insights: 0 (categories: none). Empty follows from
+  [2]: no energy events to correlate.`
+- `outcome VERIFIED`, `result class SUCCESS`; counterfactual kWh
+  (expected without change) 5,941.5; actual kWh (measured after change)
+  5,531.5; saving kWh 410.1; uncertainty kWh (90 %) 157.2; verified
+  saving kWh 410.1; cost INR 3,282 (ILLUSTRATIVE tariff); CO2 kg 291.1
+  (provisional CEA v21.0 factor, CO2 only, not CO2e).
+- The energy and CO2 figures repeat exactly on every run. The cost does
+  not: the demo window ends at the current hour, so the saving falls into
+  different time-of-day tariff periods (a later run printed INR 3,026).
+  Quote the cost as "about INR 3,000, illustrative tariff".
+
+Shifted run (`run_demo.py --shifted`, operating conditions shift after
+the change):
+
+- Same [2]/[3] lines as the default run (0 events, 0 insights, expected
+  for the same reason: the waste is inside the reference window).
+- `outcome NOT_COMPARABLE`, `result class NOT_COMPARABLE`; counterfactual,
+  actual, saving, uncertainty and verified saving all `-` (no saving
+  reported); reasons: `mean production changed +57.3 % (tolerance ±15 %)`.
+- Ends with `Unable to verify savings under current conditions.`
+
+The shifted run exercises the same simulator-kwarg pattern as
+`tests/integration/test_interventions.py::test_not_comparable_production_reports_no_saving`
+(`post_idle_scale=0.1` alongside the REDUCE_IDLE intervention): the
+production change makes the post period non-comparable, so verification
+reports NOT_COMPARABLE instead of a saving.
