@@ -272,3 +272,192 @@ The shifted run exercises the same simulator-kwarg pattern as
 (`post_idle_scale=0.1` alongside the REDUCE_IDLE intervention): the
 production change makes the post period non-comparable, so verification
 reports NOT_COMPARABLE instead of a saving.
+
+## Simulator calibration (2026-09-29)
+
+The demo furnace's rated power was raised from 150 kW to 200 kW (seed
+`database/seeds/phase1.sql`, `DEFAULT_MACHINES`, `scripts/demo/run_demo.py`).
+At 150 kW the simulated furnace ran at about 530 kWh per tonne, below the
+500-560 kWh/t it physically takes to melt and superheat iron and well below
+the 625-900 kWh/t reported for Indian foundry clusters (BEE/SAMEEEKSHA). At
+200 kW the same heats run at a median 668 kWh/t (best heat 598, worst 715),
+inside the typical band. Heat timing, charge and melt rate are unchanged.
+
+Consequence for the demo: every energy figure scales by 4/3 and the
+percentages are unchanged. `run_demo.py` now reports VERIFIED, counterfactual
+7,922.1 kWh, saving 546.7 kWh +/- 209.6 kWh (90 %), -6.9 %, CO2 388.2 kg
+(provisional factor). The Phase 5 table above and the final integration run
+were recorded at 150 kW and are kept as history.
+
+Two tests pinned the old number and now derive it from the rated power:
+`tests/unit/test_tariff_shift.py` (melting power = 0.95 x rated) and
+`tests/integration/test_phase4a.py::test_4` (peak cap just above melting
+power). Full suite before those two fixes: 268 passed, 2 failed (exactly
+those two), 1 skipped; both pass after the fix.
+
+## Console features (2026-09-29)
+
+What was checked on the new console screens (all SIMULATED data): the demo
+inject test (`tests/api/test_demo.py`, 2 passed: 404 without `DEMO_MODE`;
+injected air leak detected on compressor-01), a live inject of
+`furnace_holding` rewriting the last 4 hours of furnace-01 as `IDLE_WASTE`
+(detected as `L1_IDLE_WASTE` on furnace-01, 3 recommendations created), and
+the deck screenshots under `docs/deck/screens/`. The Tamil/Hindi morning
+brief wording is machine-drafted and pending native-speaker review before
+any real use.
+
+## Verification Monte Carlo (2026-09-29)
+
+Is the saving verification skill or luck? `scripts/validation/monte_carlo_verify.py`
+simulates 100 plants per scenario whose TRUE saving is known by paired runs
+with common random numbers: the SAME plant twice with the same seed, once
+with the intervention, once with a NO-OP intervention (same type, start_h
+and compliance, but `effectiveness=0.0` and `rebound=0.0`; same
+`post_idle_scale` in both runs, so the shift scenario isolates the
+intervention effect under shifted conditions). The NO-OP draws the same
+random numbers the fix path draws (`_plan_idle_hold` takes one
+`rng.random()` per idle gap whenever `idle_hold_frac_fixed` is set), so the
+two runs differ only by the physics of the fix. Effectiveness maps to
+`idle_hold_frac_fixed = chronic × (1 − effectiveness)`
+(`factory_simulator._apply_practice`), so effectiveness 0 leaves holding
+unchanged. TRUE saving = energy(NO-OP post) − energy(intervention post).
+Setup like `run_demo.py`: furnace-01 (200 kW), chronic idle holding 60 %,
+7-day baseline + 3-day measurement, step 300 s, `verify` called WITHOUT the
+database. Each pair also carries a `paired` flag (heat-start times identical
+in both runs); coverage and false-claim are reported over all pairs and over
+paired pairs only, and nothing is dropped. The per-pair assertions held for
+all 500 pairs (pre-period energies identical; no_effect post-period energies
+identical, TRUE exactly 0). All data SIMULATED. Thresholds were NOT tuned to
+these numbers. Command (from the repo root, ~1–2 min; 74 s observed):
+
+`.venv\Scripts\python scripts\validation\monte_carlo_verify.py --n 100 --seed0 1`
+
+Per-run rows: `docs/validation/monte_carlo_verify.csv`. Full tables plus one
+plain paragraph per scenario: `docs/validation/monte_carlo_verify.md`.
+false-claim = share VERIFIED among runs with TRUE saving ≤ 0; coverage = share
+of comparable runs (a saving was reported) where TRUE lies within reported ±
+uncertainty (stated confidence 90 %).
+
+| scenario | N | paired | VERIFIED | NOT_VERIFIED | NOT_COMPARABLE | INSUFFICIENT_DATA | false-claim all | false-claim paired | coverage all | coverage paired | mean TRUE kWh | mean reported kWh | mean \|error\| kWh |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| no_effect | 100 | 100 | 1 | 94 | 5 | 0 | 1.0% (1/100) | 1.0% (1/100) | 98.9% | 98.9% | 0.0 | −1.9 | 60.4 |
+| partial | 100 | 100 | 70 | 25 | 5 | 0 | n/a (0/0) | n/a (0/0) | 100.0% | 100.0% | 305.8 | 297.1 | 60.6 |
+| full | 100 | 0 | 98 | 0 | 2 | 0 | 50.0% (1/2) | n/a (0 paired) | 64.3% | n/a (0 paired) | 779.6 | 721.1 | 197.6 |
+| worse | 100 | 0 | 0 | 97 | 3 | 0 | 0.0% (0/100) | n/a (0 paired) | 57.7% | n/a (0 paired) | −1,094.2 | −1,125.3 | 214.6 |
+| production_shift | 100 | 100 | 0 | 0 | 100 | 0 | n/a (0/0) | n/a (0/0) | n/a | n/a | 158.3 | n/a | n/a |
+
+Reading the results:
+
+- **Common random numbers hold wherever rebound is 0.** Pre-period equality held for all 500
+  pairs and no_effect TRUE is exactly 0.0 in all 100 runs, and the paired
+  flag is 100/100 in no_effect, partial and production_shift — so those
+  scenarios' coverage and false-claim numbers are valid measurements of
+  `verify`, not realisation noise. (The previous harness used
+  `intervention=None` for the control, which skipped the per-gap compliance
+  draw and let the streams diverge.) full and worse are 0/100 paired (see
+  Diagnosis below), so their band-coverage numbers are not.
+- **Coverage is at/above 90 % where the paired comparison is exact.**
+  no_effect 98.9 % with mean |error| 60.4 kWh, partial 100.0 % with mean
+  |error| 60.6 kWh — the 90 % uncertainty band means what it says there,
+  and the paired-only cuts match the all-pairs cuts exactly (100/100 paired
+  in every rebound-free scenario). TRUE ranges are now tight and same-signed
+  per scenario (partial +179 to +450, production_shift +68 to +246 kWh).
+- **full/worse are 0/100 paired, so their coverage numbers are not
+  measurements of `verify`.** Detection direction still works (full VERIFIED
+  98/100, worse 0 false claims with 97 labelled WORSE), but coverage 64.3 % /
+  57.7 %, mean |error| ~200 kWh, the full TRUE range (−77 to +1,631 kWh) and
+  the "50 %" false-claim (1 of 2) are realisation noise from unpaired runs,
+  and the paired-only cut is n/a with no valid pairs. The method and
+  thresholds are unchanged — no tuning.
+- **Diagnosis.** Rebound moves the idle-to-heating boundary earlier inside
+  each gap-plus-heat pair: `_plan_idle_hold` banks the reheat
+  (`apps/simulator/machine_models.py:262`), the idle gap is shortened by it
+  (`machine_models.py:243`) and the next heating is lengthened by the same
+  amount (`machine_models.py:205`), so the pair keeps its total length but
+  the internal boundary shifts earlier in the intervention run only; because
+  schedule segments are built lazily (`machine_models.py:265-267`) and share
+  one rng stream with the per-step measurement noise, the first shifted
+  boundary that crosses a 5-minute sampling step (seed 1, full: the second
+  post-intervention gap, heat 70 starting one step early at step 2053)
+  consumes a schedule draw in only one run and permanently offsets every
+  later draw, so later heats, states and energies are different random
+  realisations; with rebound 0 the pending reheat stays 0, no boundary ever
+  moves, and all 300 rebound-free pairs stay bit-paired.
+- **False claims are rare and counted on valid denominators.** no_effect
+  1/100 (1.0 %), worse 0/100 (never VERIFIED when energy went up).
+  The "50 %" on full is 1/2 on unpaired runs whose TRUE values are
+  themselves realisation noise, so neither the rate nor its denominator is
+  a measurement of `verify`. partial and production_shift have no TRUE ≤ 0
+  runs, so false-claim is n/a.
+- **The shift scenario is still refused 100/100** as NOT_COMPARABLE with
+  no saving reported. Its TRUE is now +158.3 kWh (was −1,789 kWh): the
+  production shift applies to both runs, so TRUE isolates the intervention
+  effect under shifted conditions instead of conflating it with the shift.
+- **Small effects are honestly borderline.** partial (effectiveness 0.5,
+  compliance 0.6) verifies in 70/100 weeks and correctly returns NO_EFFECT in
+  25 — whether it proves depends on how much idle waste that week's seed
+  happened to contain, exactly as the Phase 5 single-seed table suggested.
+- **The comparability gate fires on 2–5 % of ordinary weeks** (natural
+  production variation beyond ±15 %), refusing instead of reporting. That is
+  the gate doing its job, at the cost of occasionally discarding a fine week.
+
+## Real meter data: UCI Steel Industry (2026-09-29)
+
+Raw meter readings are MEASURED from an external dataset, never
+SIMULATED. Anything computed from them with a method or assumption is
+DERIVED. MEASURED here means only: annual kWh, kVAh sum, per-interval
+power factor, and energy by Load_Type. DERIVED means: average power
+factor, the kVAh-billing gap, the capacitor kVAr, the rupee figure
+(illustrative tariff), the non-working-hours share (stated
+working-hours assumption), the baseline, and every anomaly count.
+Dataset: UCI ML Repository id 851, Steel Industry Energy
+Consumption — DAEWOO Steel, Gwangyang, South Korea, 2018, 15-minute data,
+licence CC BY 4.0
+(https://archive.ics.uci.edu/dataset/851/steel+industry+energy+consumption).
+This is a Korean steel plant, NOT an Indian SME foundry; it is used only to
+show the JouleMitra pipeline runs end to end on real meter data.
+
+Command: `.venv\Scripts\python scripts\validation\uci_steel.py` (downloads the
+zip with urllib into `data/external/uci_steel/`, git-ignored). Full tables
+plus one plain paragraph per finding: `docs/validation/uci_steel.md`;
+per-event rows: `docs/validation/uci_steel_anomalies.csv`.
+
+Solid results first (power factor / kVAh gap / capacitor sizing /
+light-load-outside-hours share):
+
+- Annual 959,637 kWh (MEASURED), 1,087,756 kVAh sum (MEASURED); average PF
+  0.882 (DERIVED); kVAh-billing gap 128,119 kWh (DERIVED), about Rs 960,893
+  at the illustrative Rs 7.5/kWh tariff (DERIVED, illustrative only, not a
+  real tariff order).
+- Capacitor to 0.95 (DERIVED, mean-power method as the console Bill screen):
+  Light_Load PF 0.776 → 16.7 kVAr; Medium_Load 0.936 → 7.1 kVAr;
+  Maximum_Load 0.915 → 26.8 kVAr.
+- Light_Load during non-working hours (DERIVED, stated assumption: Weekend
+  any time plus weekdays outside 09:00–18:00): 135,387 kWh, 14.1 % of the
+  year. Change the working-hours assumption and this share moves.
+
+Baseline and anomaly counts (DERIVED, NOT a detection result):
+
+- Baseline (DERIVED; project services, non-production path: machine_type
+  "compressor" with non_production_types ["pump", "compressor"],
+  state-hours-only features; Load_Type Light->idle, Medium->holding,
+  Maximum->running; L1_POWER disabled, all other rules at config defaults;
+  fit first 8 weeks, detect rest): fit OK but G14 NOT_ACCEPTABLE (CV(RMSE)
+  holdout 67.3 %, NMBE 2.6 %) — energy varies widely inside a Load_Type,
+  the documented compressor limitation without a production/demand driver.
+- What this proves is only that the pipeline ran end to end on real meter
+  data. The anomaly counts below are NOT a detection result, for three
+  reasons: (1) the baseline failed its own quality check — G14
+  NOT_ACCEPTABLE with CV(RMSE) 67.3 %; (2) L1_IDLE_WASTE fires nightly
+  only because this dataset has no production counts, so every sustained
+  Light_Load stretch looks like energy with no output; (3) the largest
+  events are all 08:00 shift starts, which the state-hours-only baseline
+  cannot model. Lesson: for plants without production data the baseline
+  needs a time-of-day / shift driver (future work). Counts are kept for
+  transparency, not as findings.
+- Anomaly events (DERIVED, NOT a finding; 7,416 hourly intervals): 979
+  total — L1_DEVIATION 240, L1_IDLE_WASTE 313, L1_POWER_FACTOR 260,
+  L2_MAD_RESIDUAL 166, L1_POWER 0. Five largest by |deviation| are
+  Light-labelled 08:00 morning shift starts at +291 to +397 % (e.g.
+  2018-03-22 08:00, actual 314.4 kWh vs expected 63.3 kWh) — DERIVED
+  artefacts of a baseline with no time-of-day driver, not confirmed waste.

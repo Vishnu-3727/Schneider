@@ -112,6 +112,16 @@ docker compose up -d db
 powershell -ExecutionPolicy Bypass -File scripts\demo\demo.ps1 [-Shifted] [-Detection] [-Dashboard]  # one-click: db+mqtt, backend, demo
 ```
 
+Console (`/console/`, live API only, every figure from the backend): the screens
+in order are Plant (wiring diagram + 3D floor), Detect, Heats, Twin, Bill,
+Health, Plan, Brief, Act, Prove, Scale.
+
+`DEMO_MODE=true` enables `POST /demo/inject` and the console's "Try a fault"
+button; it rewrites the last N hours of SIMULATED data. Never enable on a real
+plant. URL options: `?static=1` (still rendering for screenshots),
+`?view=3d` (Plant opens on the 3D floor), `?lang=ta|hi` (Brief in Tamil/Hindi),
+`?trail=impact` (Prove opens with the number's provenance panel).
+
 Scenarios `NORMAL`, `IDLE_WASTE`, `HIGH_LOAD`, `PRODUCTION_SURGE` are
 implemented (others raise `NotImplementedError`, Phase 3+). Reference +
 scenario run, e.g. 7 NORMAL days then 24 h waste:

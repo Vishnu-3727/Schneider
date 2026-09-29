@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 data/simulated/*.csv
 !data/simulated/.gitkeep
+data/external/
 *.db
 .streamlit/
 

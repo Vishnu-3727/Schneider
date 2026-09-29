@@ -187,12 +187,16 @@ def test_3b_infeasible_peak_cap_below_melting(p4a):
 
 def test_4_peak_cap_hard_vs_objective(p4a):
     c = p4a["client"]
+    # Cap sits just above the furnace's melting power so melting fits but
+    # melting + the 30 kW aux job does not (derived from the rated power).
+    rated = next(m.rated_power_kw for m in DEFAULT_MACHINES if m.machine_id == "furnace-01")
+    cap = rated * 0.95 + 7.5
     start = datetime(2026, 9, 18, 0, 0, tzinfo=TZ).isoformat()
     end = datetime(2026, 9, 18, 12, 0, tzinfo=TZ).isoformat()
     r = c.post("/optimization/run", json={
         "machine_id": "furnace-01", "start": start, "end": end,
         "constraints": {"required_heats": 3, "slot_min": 30,
-                        "peak_cap_kw": 150.0,
+                        "peak_cap_kw": cap,
                         "aux_tasks": [{"name": "pump-job", "duration_h": 1.0,
                                        "window_start_h": 0.0, "window_end_h": 12.0,
                                        "power_kw": 30.0}],
@@ -203,16 +207,16 @@ def test_4_peak_cap_hard_vs_objective(p4a):
     rec = Schedule.from_dict(run["recommended"])
     cc = _stored_constraints(run)
     medians = _state_median_powers(p4a)
-    assert medians["melting"] < 150.0 < medians["melting"] + 30.0  # tension setup
+    assert medians["melting"] < cap < medians["melting"] + 30.0  # tension setup
     assert validate(rec, cc, medians) == []
     cur = run["metrics"]["current"]
     recm = run["metrics"]["recommended"]
     print(f"\npeak-cap case: current INR {cur['cost_inr']['value']:.0f} "
           f"({cur['energy_kwh']['value']:.0f} kWh) -> recommended "
           f"INR {recm['cost_inr']['value']:.0f} ({recm['energy_kwh']['value']:.0f} kWh), "
-          f"peak {recm['peak_kw']['value']:.1f} kW vs cap 150 kW")
-    # Cap never exceeded on any slot (median melting ~142 + aux 30 > 150).
-    assert recm["peak_kw"]["value"] <= 150.0 + 1e-9
+          f"peak {recm['peak_kw']['value']:.1f} kW vs cap {cap:.1f} kW")
+    # Cap never exceeded on any slot (median melting + aux 30 > cap).
+    assert recm["peak_kw"]["value"] <= cap + 1e-9
     assert recm["production_kg"]["value"] == pytest.approx(3 * 375.0)
 
 

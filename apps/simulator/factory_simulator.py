@@ -94,7 +94,7 @@ class MachineSpec:
 
 
 DEFAULT_MACHINES = [  # mirrors database/seeds/phase1.sql demo instances
-    MachineSpec("furnace-01", "furnace", 150.0),
+    MachineSpec("furnace-01", "furnace", 200.0),
     MachineSpec("compressor-01", "compressor", 30.0),
     MachineSpec("pump-01", "pump", 15.0),
 ]

@@ -23,6 +23,8 @@ $backend = $null
 try { Invoke-WebRequest -UseBasicParsing http://localhost:8000/health/components -TimeoutSec 5 | Out-Null; Write-Host "[4/6] reusing backend on :8000" }
 catch {
   Write-Host "[4/6] starting backend on :8000..."
+  # Demo mode enables the console's "Try a fault" button (POST /demo/inject).
+  $env:DEMO_MODE = "true"
   $backend = Start-Process -FilePath ".\.venv\Scripts\python.exe" -ArgumentList "-m", "uvicorn", "apps.backend.main:app", "--port", "8000" -RedirectStandardOutput "$env:TEMP\joulemitra-backend-out.log" -RedirectStandardError "$env:TEMP\joulemitra-backend-err.log" -WindowStyle Hidden -PassThru
   $startedBackend = $true
   $up = $false

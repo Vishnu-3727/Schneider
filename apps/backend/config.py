@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     API_BASE_URL: str = "http://localhost:8000"
     TZ: str = "Asia/Kolkata"
     STALE_AFTER_S: int = 900
+    # Demo-only fault injection (POST /demo/inject). Off unless set: it
+    # rewrites recent SIMULATED data and must never exist on a real plant.
+    DEMO_MODE: bool = False
     CLOCK_SKEW_S: int = 300
     SPIKE_MULTIPLE: float = 1.5
 

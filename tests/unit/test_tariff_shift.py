@@ -45,7 +45,8 @@ def test_tariff_shift_keeps_normal_physics():
     # Same per-heat physics: melting power fraction of rated, charge ~375 kg.
     melts = [t["power_kw"] for t in tel if t["machine_id"] == "furnace-01"
              and t["machine_state"] == "melting"]
-    assert melts and sum(melts) / len(melts) == pytest.approx(150.0 * 0.95, rel=0.05)
+    rated = next(m.rated_power_kw for m in DEFAULT_MACHINES if m.machine_id == "furnace-01")
+    assert melts and sum(melts) / len(melts) == pytest.approx(rated * 0.95, rel=0.05)
     qtys = [p["qty_good_kg"] for p in prod if p["machine_id"] == "furnace-01"]
     assert sum(qtys) > 0  # still produces
 

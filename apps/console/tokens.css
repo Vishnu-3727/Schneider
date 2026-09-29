@@ -7,18 +7,20 @@
   --color-sheet: oklch(99.4% 0.002 110);    /* the one raised sheet per screen */
   --color-ink: oklch(24% 0.025 255);        /* graphite */
   --color-ink-2: oklch(45% 0.02 250);       /* steel */
-  --color-ink-3: oklch(60% 0.015 250);
+  --color-ink-3: oklch(50% 0.015 250);       /* quiet labels; ~50 % L keeps small text >= 4.5:1 on paper/sheet */
   --color-rule: oklch(87% 0.008 110);
   --color-accent: oklch(64% 0.19 42);       /* molten: measured energy, waste */
   --color-accent-soft: oklch(93% 0.045 55);
+  --color-accent-ink: oklch(45% 0.15 42);   /* dark orange text on soft orange */
   --color-projected: oklch(52% 0.17 265);   /* blueprint: projected plans */
   --color-projected-soft: oklch(93% 0.035 265);
   --color-verified: oklch(50% 0.11 160);    /* verified savings only */
   --color-verified-soft: oklch(93% 0.04 160);
   --color-warn: oklch(52% 0.19 27);         /* critical */
+  --color-warn-soft: oklch(93% 0.04 27);
 
   --font-display: "Archivo", "Segoe UI", system-ui, sans-serif;
-  --font-body: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Archivo", "Noto Sans Tamil", "Noto Sans Devanagari", "Segoe UI", system-ui, sans-serif;
   --font-numerals: "Archivo", "Segoe UI", system-ui, sans-serif;
   --font-mono: "Archivo", "Segoe UI", system-ui, sans-serif;
   --font-sans: "Archivo", "Segoe UI", system-ui, sans-serif;
@@ -39,6 +41,7 @@
   --text-lead: 1.3rem;
   --text-body: 1rem;
   --text-label: 0.8125rem;
+  --text-micro: 0.8rem;   /* floor for anything on screen; never set smaller */
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;

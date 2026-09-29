@@ -6,10 +6,12 @@
 <title>JouleMitra Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=block" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Noto+Sans+Tamil:wght@400;600&family=Noto+Sans+Devanagari:wght@400;600&display=block" rel="stylesheet">
 <link rel="stylesheet" href="/console/tokens.css">
 <link rel="stylesheet" href="/console/console.css">
 <script src="/console-vendor/plotly.min.js"></script>
+<script src="/console/vendor/three.min.js"></script>
+<script src="/console/vendor/OrbitControls.js"></script>
 <script src="/console/console.js" defer></script>
 </head>
 <body>
@@ -18,14 +20,9 @@
   <header class="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span>JouleMitra</div>
     <nav class="flow" aria-label="The JouleMitra loop">
-      <a class="nav-step" href="#plant" data-screen="plant"><b>1</b>Plant</a>
-      <a class="nav-step" href="#detect" data-screen="detect"><b>2</b>Detect</a>
-      <a class="nav-step" href="#health" data-screen="health"><b>3</b>Health</a>
-      <a class="nav-step" href="#optimise" data-screen="optimise"><b>4</b>Optimise</a>
-      <a class="nav-step" href="#act" data-screen="act"><b>5</b>Act</a>
-      <a class="nav-step" href="#impact" data-screen="impact"><b>6</b>Prove</a>
-      <a class="nav-step" href="#payback" data-screen="payback"><b>7</b>Scale</a>
+      <span class="phase"><span class="phase-label">See</span><a class="nav-step" href="#plant" data-screen="plant"><b>1</b>Plant</a><a class="nav-step" href="#detect" data-screen="detect"><b>2</b>Detect</a><a class="nav-step" href="#heats" data-screen="heats"><b>3</b>Heats</a><a class="nav-step" href="#twin" data-screen="twin"><b>4</b>Twin</a><a class="nav-step" href="#bill" data-screen="bill"><b>5</b>Bill</a><a class="nav-step" href="#health" data-screen="health"><b>6</b>Health</a></span><span class="phase"><span class="phase-label">Decide</span><a class="nav-step" href="#optimise" data-screen="optimise"><b>7</b>Plan</a><a class="nav-step" href="#brief" data-screen="brief"><b>8</b>Brief</a><a class="nav-step" href="#act" data-screen="act"><b>9</b>Act</a></span><span class="phase"><span class="phase-label">Prove</span><a class="nav-step" href="#impact" data-screen="impact"><b>10</b>Prove</a><a class="nav-step" href="#payback" data-screen="payback"><b>11</b>Scale</a></span>
     </nav>
+    <button type="button" class="btn sm fault-btn" id="fault-open">Try a fault</button>
     <p class="legend" aria-label="Colour key">
       <span class="k measured">measured</span><span class="k projected">projected</span><span class="k verified">verified</span>
     </p>
@@ -40,7 +37,7 @@
       <div class="screen-body">
         <div class="kpi-row" id="plant-kpis"></div>
         <div class="attn"><h2>Needs attention</h2><ul class="attn-list" id="plant-attn"></ul></div>
-        <div id="plant-tiles"></div>
+        <div class="plant-wrap"><div class="view-toggle" role="group" aria-label="Plant view"><button type="button" data-view="wiring">Wiring</button><button type="button" data-view="3d">3D floor</button></div><div id="plant-tiles"></div></div>
       </div>
     </section>
 
@@ -51,7 +48,44 @@
       </div>
       <div class="screen-body">
         <div class="panel sheet"><h2 id="detect-title">Actual vs expected</h2><p class="lead" id="detect-sum"></p><div class="chart" id="detect-chart"></div></div>
-        <div class="panel"><h2>Alerts</h2><div id="detect-alerts-list"></div></div>
+        <div class="panel"><h2>Alerts</h2><div id="detect-alerts-list"></div><div class="air" id="detect-air"></div></div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-heats" aria-label="Every heat, costed">
+      <div class="screen-head">
+        <div><h1>Every heat, costed</h1><p class="sub">Each melt in the last 24 hours: energy, output, energy per tonne and how hot it was taken.</p></div>
+        <div class="chips" id="chips-heats"></div>
+      </div>
+      <div class="screen-body">
+        <div class="heats-top"><div class="bench" id="heats-bench"></div><div class="heats-sum" id="heats-sum"></div></div>
+        <div class="sheet heats-table-wrap"><table class="heats-table" id="heats-table"></table></div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-twin" aria-label="Run a heat">
+      <div class="screen-head">
+        <div><h1>Run a heat</h1><p class="sub">Change the charge, the timing and how long it is held, then run it and see what it costs.</p></div>
+        <div class="chips" id="chips-twin"></div>
+      </div>
+      <div class="screen-body">
+        <div class="sheet twin-stage"><div class="twin-3d" id="twin-3d"></div><p class="twin-phase" id="twin-phase">drag to turn the furnace</p></div>
+        <div class="twin-side"><div class="twin-controls" id="twin-controls"></div><div class="twin-out" id="twin-out"></div></div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-bill" aria-label="The whole bill">
+      <div class="screen-head">
+        <div><h1>The whole bill</h1><p class="sub">Where the money goes, the parts of the bill nobody watches, and the carbon in every tonne.</p></div>
+        <div class="chips" id="chips-bill"></div>
+      </div>
+      <div class="screen-body">
+        <div class="sheet ribbon-wrap"><div class="ribbon-head"><h2 id="ribbon-title">The furnace's last 24 hours: where the rupees went</h2><p class="ribbon-key"><span class="k s-heating"></span>heating<span class="k s-melting"></span>melting<span class="k s-holding"></span>holding, no pour<span class="k s-idle"></span>idle</p></div><div class="ribbon" id="ribbon"></div><div class="ribbon-axis" id="ribbon-axis"></div><p class="ribbon-sum" id="ribbon-sum"></p></div>
+        <div class="bill-grid">
+          <div class="panel"><h2>Power factor and demand</h2><div id="bill-pf"></div></div>
+          <div class="panel"><h2>Energy in scrapped castings</h2><div id="bill-reject"></div></div>
+          <div class="panel"><h2>Carbon in every tonne</h2><div id="bill-carbon"></div></div>
+        </div>
       </div>
     </section>
 
@@ -68,12 +102,26 @@
 
     <section class="screen" id="screen-optimise" aria-label="A cheaper schedule">
       <div class="screen-head">
-        <div><h1>A cheaper schedule</h1><p class="sub">Same heats, same output, started at better hours. A plan, not yet done.</p></div>
+        <div><h1>Plan tomorrow</h1><p class="sub">Drag the heats yourself, or give the optimiser your limits and let it plan. Same output either way.</p></div>
         <div class="chips" id="chips-optimise"></div>
       </div>
       <div class="screen-body">
-        <div class="sheet ribbon-wrap"><div class="ribbon-head"><h2 id="ribbon-title">The furnace's last 24 hours: where the rupees went</h2><p class="ribbon-key"><span class="k s-heating"></span>heating<span class="k s-melting"></span>melting<span class="k s-holding"></span>holding, no pour<span class="k s-idle"></span>idle</p></div><div class="ribbon" id="ribbon"></div><div class="ribbon-axis" id="ribbon-axis"></div><p class="ribbon-sum" id="ribbon-sum"></p></div>
-        <div class="panel"><h2 id="opt-title">Current vs recommended</h2><div class="tariff-strip" id="opt-tariff"></div><div class="chart" id="opt-chart"></div><p class="note" id="opt-explain"></p></div>
+        <div class="panel sheet"><h2 id="opt-title">Current vs recommended</h2><div class="tariff-strip" id="opt-tariff"></div><div class="chart" id="opt-chart"></div><p class="note" id="opt-explain"></p></div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-brief" aria-label="Morning brief">
+      <div class="screen-head">
+        <div><h1 id="brief-h1">Morning brief</h1><p class="sub" id="brief-sub">The three biggest money actions from yesterday, as the supervisor reads them on the phone.</p></div>
+        <div class="chips" id="chips-brief"></div>
+      </div>
+      <div class="screen-body">
+        <div class="brief-left">
+          <div class="lang" role="group" aria-label="Language"><button type="button" data-lang="en">English</button><button type="button" data-lang="ta" lang="ta">தமிழ்</button><button type="button" data-lang="hi" lang="hi">हिन्दी</button></div>
+          <div class="msg" id="brief-msg"></div>
+          <p class="note" id="brief-preview"></p>
+        </div>
+        <div class="panel"><h2 id="brief-why-h"></h2><p class="note" id="brief-why-note"></p><div id="brief-why"></div></div>
       </div>
     </section>
 
@@ -116,6 +164,18 @@
       </div>
     </section>
   </main>
+  <aside class="trail faults" id="faults" aria-label="Try a fault">
+    <button class="trail-close" type="button" aria-label="Close" id="fault-close">×</button>
+    <h2>Break something, watch it get caught</h2>
+    <p class="note">Rewrites the last 4 hours of simulated data for one machine with a real simulator fault, then runs detection, health scoring and recommendations. Nothing touches a real machine.</p>
+    <div class="fault-list">
+      <button type="button" class="btn" data-fault="air_leak">Air leak on the compressor</button>
+      <button type="button" class="btn" data-fault="furnace_holding">Leave the furnace holding, no pour</button>
+      <button type="button" class="btn" data-fault="furnace_wear">Furnace wearing out (vibration, heat)</button>
+      <button type="button" class="btn ghost" data-fault="restore">Restore normal operation</button>
+    </div>
+    <div id="fault-log" aria-live="polite"></div>
+  </aside>
   <aside class="trail" id="trail" aria-label="Where this number comes from" aria-live="polite"></aside>
   <p class="keys" aria-hidden="true">← → to move between screens · click an underlined number to see where it comes from</p>
 </div>

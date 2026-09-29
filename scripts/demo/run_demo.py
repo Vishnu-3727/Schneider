@@ -64,7 +64,7 @@ def call(api: httpx.Client, method: str, path: str, **kw) -> dict:
 
 def ingest(api: httpx.Client, end: datetime, seed: int, shifted: bool) -> None:
     extra = {"post_idle_scale": 0.1} if shifted else {}
-    fac = SimulatedFactory([MachineSpec(MACHINE, "furnace", 150.0)], hours=BASE_H + POST_H,
+    fac = SimulatedFactory([MachineSpec(MACHINE, "furnace", 200.0)], hours=BASE_H + POST_H,
                            step_s=300, seed=seed, end=end, chronic_idle_hold_frac=0.6,
                            intervention={"type": "REDUCE_IDLE", "start_h": BASE_H,
                                          "effectiveness": 1.0, "rebound": 0.15},

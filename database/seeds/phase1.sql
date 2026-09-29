@@ -10,7 +10,7 @@ ON CONFLICT (id) DO UPDATE SET
     timezone = EXCLUDED.timezone, industry_type = EXCLUDED.industry_type;
 
 INSERT INTO machine (id, site_id, name, machine_type, rated_power_kw) VALUES
-    ('furnace-01', 'demo-foundry-01', 'Induction Furnace 1', 'furnace', 150.0),
+    ('furnace-01', 'demo-foundry-01', 'Induction Furnace 1', 'furnace', 200.0),
     ('compressor-01', 'demo-foundry-01', 'Air Compressor 1', 'compressor', 30.0),
     ('pump-01', 'demo-foundry-01', 'Cooling Pump 1', 'pump', 15.0)
 ON CONFLICT (id) DO UPDATE SET

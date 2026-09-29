@@ -10,7 +10,7 @@
   var STATIC = new URLSearchParams(window.location.search).has("static");
   if (STATIC) document.documentElement.classList.add("static");
 
-  var SCREENS = ["plant", "detect", "health", "optimise", "act", "impact", "payback"];
+  var SCREENS = ["plant", "detect", "heats", "twin", "bill", "health", "optimise", "brief", "act", "impact", "payback"];
   var STALE_MS = 15 * 60 * 1000;
   var TZ = "Asia/Kolkata";
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -253,11 +253,15 @@
   }
 
   /* ================= 1. PLANT ================= */
+  var plantSeq = 0;
   async function loadPlant() {
+    /* A newer load (e.g. after a fault) supersedes one still awaiting. */
+    var seq = ++plantSeq;
     var kpis = document.getElementById("plant-kpis");
     var tiles = document.getElementById("plant-tiles");
     var machines = await api("/machines");
     var summary = await api("/dashboard/summary", { hours: 24 });
+    if (seq !== plantSeq) return;
     if ((machines && machines.error) || (summary && summary.error)) {
       kpis.innerHTML = '<div class="kpi-card">' + naHtml() + "</div>";
       tiles.innerHTML = '<div class="tile">' + naHtml() + "<p class='note'>" +
@@ -288,6 +292,7 @@
       kpiCard("Open alerts", '<span class="num">' + openAlerts + "</span>", null);
     var extra = await Promise.all([api("/energy/anomalies"), api("/recommendations"),
       api("/verification"), api("/machine-health"), api("/health/components")]);
+    if (seq !== plantSeq) return;
     var anoms = ((extra[0] && extra[0].anomalies) || []).filter(function (e) { return e.status === "OPEN"; });
     var pend = ((extra[1] && extra[1].recommendations) || []).filter(function (r) { return r.status === "PENDING_REVIEW"; });
     var ver = ((extra[2] && extra[2].verification) || []).filter(function (v) { return v.outcome === "VERIFIED"; })[0];
@@ -295,7 +300,8 @@
     var health = {};
     hRows.forEach(function (h) { health[h.machine_id] = h; });
     renderAttention(anoms, pend, ver);
-    renderPlantDiagram(rows, health, anoms, extra[4] || {});
+    PLANT_ARGS = [rows, health, anoms, extra[4] || {}];
+    renderPlantView();
   }
 
   /* One-line drawing of the installation (docs/deployment/WIRING.md):
@@ -409,6 +415,7 @@
   /* ================= 2. DETECT ================= */
   async function loadDetect() {
     var list = document.getElementById("detect-alerts-list");
+    loadAir();
     var anomalies = await api("/energy/anomalies");
     if (!anomalies || anomalies.error || !(anomalies.anomalies || []).length) {
       document.getElementById("detect-title").textContent = "Actual vs expected";
@@ -549,35 +556,306 @@
   }
 
   /* ================= 4. OPTIMISE ================= */
-  function schedBars(sched, label, c) {
-    if (!sched || !sched.heats || !sched.heats.length) return [];
-    var slotMin = sched.slot_min || 15;
-    var phases = [
-      ["heating_slots", "heating", c.accent],
-      ["melting_slots", "melting", c.ink2],
-      ["holding_slots", "holding", c.ink3]
-    ];
-    return phases.map(function (ph) {
-      var x = [], base = [];
-      sched.heats.forEach(function (h) {
-        var t = h.start_slot || 0;
-        var order = ["heating_slots", "melting_slots", "holding_slots"];
-        order.forEach(function (k) {
-          if (k === ph[0]) { x.push((h[k] || 0) * slotMin / 60); base.push(t * slotMin / 60); }
-          if (order.indexOf(k) < order.indexOf(ph[0])) t += (h[k] || 0);
-        });
-      });
-      return {
-        /* One lane per schedule: every heat sits on the same row, so the
-         * shift in time reads at a glance. */
-        x: x, base: base, y: sched.heats.map(function () { return label === "current" ? "Today" : "Recommended"; }),
-        type: "bar", orientation: "h", name: ph[1], legendgroup: ph[1], showlegend: label === "current",
-        width: 0.6,
-        marker: { color: ph[2], line: { color: c.paper, width: 1 } },
-        hovertemplate: "%{y}: " + ph[1] + " %{x:.2f}h<extra></extra>"
-      };
-    });
+  /* ================= 6. OPTIMISE: drag-and-drop heat planner =================
+   * Two lanes over the tariff bands: today's heats (fixed) and your plan,
+   * which starts as the optimiser's answer. Drag a heat in 15-minute steps;
+   * the day's cost is re-estimated with the furnace model (power per state
+   * x tariff of each slot). Auto-plan sends your heat count and peak cap to
+   * the real optimiser (POST /optimization/run) and reloads its answer. */
+  var PLAN = null;
+  function heatSlots(h) { return (h.heating_slots || 0) + (h.reheat_slots || 0) + (h.melting_slots || 0) + (h.holding_slots || 0); }
+  /* ONE tariff matcher, mirroring services/optimization/evaluate.py rate_at:
+   * end_h 0 (or missing) means 24; end_h <= start_h wraps past midnight. */
+  function periodAt(periods, hh) {
+    for (var i = 0; i < (periods || []).length; i++) {
+      var p = periods[i], s = p.start_h, e = (p.end_h == null || p.end_h === 0) ? 24 : p.end_h;
+      if (s == null) continue;
+      if (s <= e) { if (hh >= s && hh < e) return p; }
+      else if (hh >= s || hh < e) return p;
+    }
+    return null;
   }
+  function planCost(heats, tp, rated, slotMin) {
+    var kwh = 0, inr = 0, peakE = 0, F = FURNACE_MODEL.frac;
+    var dear = null;
+    (tp || []).forEach(function (p) { if (dear == null || p.rate > dear) dear = p.rate; });
+    heats.forEach(function (h) {
+      var seq = [];
+      for (var i = 0; i < (h.heating_slots || 0) + (h.reheat_slots || 0); i++) seq.push(F.heating);
+      for (i = 0; i < (h.melting_slots || 0); i++) seq.push(F.melting);
+      for (i = 0; i < (h.holding_slots || 0); i++) seq.push(F.holding);
+      seq.forEach(function (fr, k) {
+        var hh = (((h.start_slot + k) * slotMin) / 60) % 24, e = rated * fr * slotMin / 60;
+        var per = periodAt(tp, hh), rate = per ? per.rate : 0;
+        kwh += e; inr += e * rate; if (per && dear != null && per.rate === dear) peakE += e;
+      });
+    });
+    return { kwh: kwh, inr: inr, eveningPct: kwh ? peakE / kwh * 100 : 0 };
+  }
+  function renderPlanner(run, tp, rated, mid) {
+    var box = document.getElementById("opt-chart");
+    var cur = run.current_schedule || run.current || {}, rec = run.recommended_schedule || run.recommended || {};
+    var slotMin = rec.slot_min || 15, nSlots = rec.n_slots || 96;
+    if (!rec.heats || !rec.heats.length) { box.innerHTML = naHtml("no recommended schedule in this run"); return; }
+    PLAN = rec.heats.map(function (h) { return Object.assign({}, h); });
+    var today = planCost(cur.heats || [], tp, rated, slotMin);
+    var maxRate = Math.max.apply(null, tp.map(function (t) { return t.rate; }).concat([1]));
+    var pct = function (slot) { return (slot / nSlots * 100) + "%"; };
+    function blocks(heats, lane) {
+      return heats.map(function (h, i) {
+        var hs = (h.heating_slots || 0) + (h.reheat_slots || 0), ml = h.melting_slots || 0, hd = h.holding_slots || 0, L = heatSlots(h);
+        return '<div class="pl-block' + (lane === "plan" ? " drag" : "") + '" data-i="' + i + '" style="left:' + pct(h.start_slot) + ";width:" + pct(L) + '"' +
+          (lane === "plan" ? ' tabindex="0" role="slider" aria-label="Heat ' + (i + 1) + ' start" aria-valuenow="' + h.start_slot + '"' : "") + ">" +
+          '<i class="s-heating" style="flex:' + hs + '"></i><i class="s-melting" style="flex:' + ml + '"></i><i class="s-holding" style="flex:' + hd + '"></i></div>';
+      }).join("");
+    }
+    box.innerHTML =
+      '<div class="pl-top"><div class="pl-live" id="pl-live"></div>' +
+      '<div class="pl-ctl"><label>Heats <input type="number" id="pl-n" min="1" max="14" value="' + PLAN.length + '"></label>' +
+      '<label>Peak cap <input type="range" id="pl-cap" min="0" max="' + Math.round(rated * 1.3) + '" step="5" value="0"><output id="pl-capv">none</output></label>' +
+      '<button type="button" class="btn sm" id="pl-auto">Auto-plan with the optimiser</button>' +
+      '<button type="button" class="btn sm ghost" id="pl-reset">Reset</button></div></div>' +
+      '<div class="pl-board"><div class="pl-bands">' + tp.map(function (t) {
+        return '<span style="left:' + ((t.start_h / 24) * 100) + "%;width:" + ((((t.end_h || 24) - t.start_h) / 24) * 100) + "%;opacity:" + (0.25 + 0.75 * t.rate / maxRate).toFixed(2) + '"><b>₹' + fmt(t.rate, 1) + "</b></span>";
+      }).join("") + "</div>" +
+      '<div class="pl-lane"><span class="pl-name">Today</span><div class="pl-track">' + blocks(cur.heats || [], "today") + "</div></div>" +
+      '<div class="pl-lane"><span class="pl-name">Your plan</span><div class="pl-track" id="pl-track">' + blocks(PLAN, "plan") + "</div></div>" +
+      '<div class="pl-axis">' + [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24].map(function (h) {
+        return '<span style="left:' + (h / 24 * 100) + '%">' + String(h).padStart(2, "0") + ":00</span>"; }).join("") + "</div></div>" +
+      '<p class="note" id="pl-msg">Drag a heat in your plan (or focus it and use ← →). Figures here are the furnace model’s estimate; the optimiser’s own numbers are above. ' + badge("PROJECTED", "projected") + "</p>";
+    var track = document.getElementById("pl-track");
+    function live() {
+      var p = planCost(PLAN, tp, rated, slotMin), d = p.inr - today.inr;
+      document.getElementById("pl-live").innerHTML =
+        '<span><b class="num">₹' + esc(fmt(p.inr, 0)) + "</b> your plan</span><span><b class=\"num\">₹" + esc(fmt(today.inr, 0)) + "</b> today</span>" +
+        '<span class="' + (d <= 0 ? "good" : "bad") + '"><b class="num">' + esc(signed(d, 0)) + "</b> ₹ a day</span>" +
+        "<span>share in the dearest tariff hours <b class=\"num\">" + esc(fmt(today.eveningPct, 0)) + " % → " + esc(fmt(p.eveningPct, 0)) + " %</b></span>";
+    }
+    function fits(i, s) {
+      var L = heatSlots(PLAN[i]);
+      if (s < 0 || s + L > nSlots) return false;
+      return PLAN.every(function (o, j) { return j === i || s + L <= o.start_slot || s >= o.start_slot + heatSlots(o); });
+    }
+    function move(el, i, s) {
+      PLAN[i].start_slot = s; el.style.left = pct(s); el.setAttribute("aria-valuenow", s); live();
+    }
+    track.querySelectorAll(".pl-block.drag").forEach(function (el) {
+      var i = Number(el.getAttribute("data-i"));
+      el.addEventListener("pointerdown", function (e) {
+        el.setPointerCapture(e.pointerId); el.classList.add("held");
+        var x0 = e.clientX, s0 = PLAN[i].start_slot;
+        var scale = track.getBoundingClientRect().width / nSlots;
+        function mv(ev) { var s = s0 + Math.round((ev.clientX - x0) / scale); if (s !== PLAN[i].start_slot && fits(i, s)) move(el, i, s); }
+        function up() { el.classList.remove("held"); el.removeEventListener("pointermove", mv); el.removeEventListener("pointerup", up); }
+        el.addEventListener("pointermove", mv); el.addEventListener("pointerup", up);
+      });
+      el.addEventListener("keydown", function (e) {
+        var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+        if (!d) return;
+        e.preventDefault(); e.stopPropagation();
+        if (fits(i, PLAN[i].start_slot + d)) move(el, i, PLAN[i].start_slot + d);
+      });
+    });
+    var cap = document.getElementById("pl-cap"), capv = document.getElementById("pl-capv");
+    cap.addEventListener("input", function () { capv.textContent = Number(cap.value) ? cap.value + " kW" : "none"; });
+    document.getElementById("pl-reset").addEventListener("click", function () { renderPlanner(run, tp, rated, mid); });
+    document.getElementById("pl-auto").addEventListener("click", async function (e) {
+      var btn = e.target; btn.disabled = true;
+      var msg = document.getElementById("pl-msg");
+      msg.textContent = "Asking the optimiser…";
+      var body = { machine_id: mid, start: (run.constraints || {}).horizon_start || run.horizon_start, end: (run.constraints || {}).horizon_end || run.horizon_end,
+        constraints: { required_heats: Number(document.getElementById("pl-n").value), time_limit_s: 5 } };
+      if (Number(cap.value)) body.constraints.peak_cap_kw = Number(cap.value);
+      var r = await fetch("/optimization/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      var out = r.ok ? await r.json() : null;
+      btn.disabled = false;
+      if (!out) { msg.textContent = "The optimiser returned HTTP " + r.status + "."; return; }
+      if (out.status !== "OPTIMAL" && out.status !== "FEASIBLE") {
+        msg.innerHTML = '<b class="hot">' + esc(out.status || "no plan") + ":</b> " + txt(out.explanation || "");
+        return;
+      }
+      loadOptimise();
+    });
+    live();
+  }
+
+  /* ================= 4. TWIN: a heat you can run =================
+   * The same furnace model the simulator uses (apps/simulator/machine_models.py):
+   * power per state as a share of rated power, melt rate 500 kg/h, reheat
+   * rebound 0.15 min per cold minute. Rated power comes from /machines, the
+   * tariff from the API. Change the inputs, press Run heat, and compare the
+   * result with yesterday's measured heats. */
+  var FURNACE_MODEL = { frac: { heating: 0.85, melting: 0.95, holding: 0.45, idle: 0.08 },
+    heatMin: 20, meltKgH: 500, rebound: 0.15, yieldGood: 0.98, meltC: 1550 };
+  var TW = { charge: 375, start: 8, hold: 25, gap: 40, hot: true, tap: 1550 };
+  var twinCtx = null;
+  function twinPlan(rated, periods) {
+    var M = FURNACE_MODEL, P = rated;
+    var coldMin = TW.hot ? 0 : TW.gap;
+    var phases = [
+      ["heating", M.heatMin + M.rebound * coldMin, M.frac.heating],
+      ["melting", TW.charge / M.meltKgH * 60, M.frac.melting],
+      ["holding", TW.hold, M.frac.holding],
+      [TW.hot ? "holding" : "idle", TW.gap, TW.hot ? M.frac.holding : M.frac.idle]
+    ];
+    var t = TW.start * 60, kwh = 0, inr = 0, rows = [];
+    phases.forEach(function (ph, i) {
+      var e = 0, c = 0;
+      for (var m = 0; m < ph[1]; m++) {
+        var de = P * ph[2] / 60, hh = ((t + m) / 60) % 24;
+        var per = periodAt(periods, hh), rate = per ? per.rate : null;
+        e += de; c += de * (rate || 0);
+      }
+      t += ph[1];
+      rows.push({ state: ph[0], gap: i === 3, min: ph[1], kwh: e, inr: c });
+      kwh += e; inr += c;
+    });
+    var t_out = TW.charge / 1000;
+    var superKwh = Math.max(0, TW.tap - M.meltC) * KWH_PER_T_PER_C * t_out;
+    kwh += superKwh;
+    return { rows: rows, kwh: kwh, inr: inr, superKwh: superKwh, sec: kwh / t_out, good: TW.charge * M.yieldGood,
+      minutes: rows.reduce(function (s, r) { return s + r.min; }, 0) };
+  }
+  function tempColor(c) {
+    /* dull red at 700 C to yellow-white at 1650 C (approximate glow colour) */
+    var x = Math.max(0, Math.min(1, (c - 700) / 950));
+    return new THREE.Color().setHSL(0.02 + 0.12 * x, 1, 0.25 + 0.45 * x);
+  }
+  function buildTwin3d(el) {
+    if (!window.THREE) { el.innerHTML = naHtml("3D library missing"); return null; }
+    var w = el.clientWidth, h = el.clientHeight;
+    var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(w, h);
+    el.innerHTML = ""; el.appendChild(renderer.domElement);
+    var scene = new THREE.Scene();
+    var cam = new THREE.PerspectiveCamera(35, w / h, 0.1, 100);
+    cam.position.set(4.2, 3.4, 5.2);
+    var controls = new THREE.OrbitControls(cam, renderer.domElement);
+    controls.target.set(0, 0.9, 0); controls.enableDamping = true; controls.minDistance = 4; controls.maxDistance = 12;
+    scene.add(new THREE.HemisphereLight(0xf2f3ef, 0x3a4150, 0.9));
+    var sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(4, 8, 5); scene.add(sun);
+    var steel = new THREE.MeshStandardMaterial({ color: 0x4b5563, metalness: 0.6, roughness: 0.45 });
+    /* platform and tilt frame */
+    var base = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.3, 3.2), new THREE.MeshStandardMaterial({ color: 0x9aa1a9, roughness: 0.9 }));
+    base.position.y = 0.15; scene.add(base);
+    [-1.25, 1.25].forEach(function (x) {
+      var post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.6, 0.35), steel); post.position.set(x, 1.0, 0); scene.add(post);
+    });
+    /* refractory crucible: open cylinder, lined */
+    var shell = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1.6, 48, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x6b7280, metalness: 0.3, roughness: 0.6, side: THREE.DoubleSide }));
+    shell.position.y = 1.2; scene.add(shell);
+    var lining = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.7, 1.55, 48, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0xd6d0c4, roughness: 1, side: THREE.BackSide }));
+    lining.position.y = 1.22; scene.add(lining);
+    var floor = new THREE.Mesh(new THREE.CircleGeometry(0.7, 48), new THREE.MeshStandardMaterial({ color: 0xcfc8ba }));
+    floor.rotation.x = -Math.PI / 2; floor.position.y = 0.45; scene.add(floor);
+    var rim = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.12, 12, 64), steel); rim.rotation.x = Math.PI / 2; rim.position.y = 2.0; scene.add(rim);
+    /* copper induction coil: helix around the shell */
+    var pts = [];
+    for (var i = 0; i <= 400; i++) { var a = i / 400 * Math.PI * 2 * 7; pts.push(new THREE.Vector3(Math.cos(a) * 1.07, 0.5 + i / 400 * 1.3, Math.sin(a) * 1.07)); }
+    var coilMat = new THREE.MeshStandardMaterial({ color: 0xb87333, metalness: 0.85, roughness: 0.3, emissive: 0x000000 });
+    var coil = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 800, 0.05, 8, false), coilMat); scene.add(coil);
+    /* molten metal: a disc whose height is the melt level and colour its temperature */
+    var meltMat = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0x000000, roughness: 0.35 });
+    var melt = new THREE.Mesh(new THREE.CylinderGeometry(0.74, 0.7, 1, 48), meltMat);
+    scene.add(melt);
+    var glow = new THREE.PointLight(0xff7a1a, 0, 6); glow.position.set(0, 2.3, 0); scene.add(glow);
+    function setState(level, tempC, power) {
+      var hgt = Math.max(0.02, 1.4 * level);
+      melt.scale.y = hgt; melt.position.y = 0.46 + hgt / 2;
+      var col = tempC > 700 ? tempColor(tempC) : new THREE.Color(0x3b3b3b);
+      meltMat.color.copy(col); meltMat.emissive.copy(col).multiplyScalar(tempC > 700 ? 0.9 : 0);
+      glow.intensity = tempC > 700 ? 1.2 * level * (tempC / 1600) : 0;
+      coilMat.emissive.setRGB(0.55 * power, 0.18 * power, 0.02 * power);
+    }
+    var raf = null;
+    function loop() { controls.update(); renderer.render(scene, cam); raf = requestAnimationFrame(loop); }
+    loop();
+    return { setState: setState, renderer: renderer, stop: function () { cancelAnimationFrame(raf); } };
+  }
+  async function loadTwin() {
+    var ms = await api("/machines");
+    var f = (ms && !ms.error ? ms : []).filter(function (m) { return m.id === "furnace-01"; })[0] || {};
+    var rated = f.rated_power_kw || null;
+    var periods = await tariffPeriods();
+    var hs = await heatStats();
+    var box = document.getElementById("twin-3d");
+    if (!twinCtx) twinCtx = buildTwin3d(box);
+    if (!rated) { document.getElementById("twin-out").innerHTML = naHtml("furnace rated power not returned"); return; }
+    var fields = [
+      ["charge", "Charge", "kg", 300, 450, 5], ["start", "Start at", "h", 0, 23.5, 0.5],
+      ["hold", "Held after melting", "min", 5, 60, 1], ["gap", "Gap before the next heat", "min", 0, 90, 5],
+      ["tap", "Tap temperature", "°C", 1500, 1620, 5]
+    ];
+    var ctl = document.getElementById("twin-controls");
+    ctl.innerHTML = fields.map(function (f2) {
+      return '<label class="pb-field"><span class="pb-name">' + esc(f2[1]) + '</span><output id="twv-' + f2[0] + '"></output>' +
+        '<input type="range" min="' + f2[3] + '" max="' + f2[4] + '" step="' + f2[5] + '" value="' + TW[f2[0]] + '" data-k="' + f2[0] + '"></label>';
+    }).join("") +
+      '<label class="tw-toggle"><input type="checkbox" id="tw-hot"' + (TW.hot ? " checked" : "") + '> Keep the furnace hot in the gap</label>' +
+      '<button type="button" class="btn" id="tw-run">Run heat</button>';
+    function show() {
+      fields.forEach(function (f2) {
+        var v = TW[f2[0]];
+        document.getElementById("twv-" + f2[0]).textContent = f2[0] === "start"
+          ? String(Math.floor(v)).padStart(2, "0") + ":" + (v % 1 ? "30" : "00") : fmt(v, 0) + " " + f2[2];
+      });
+      var r = twinPlan(rated, periods);
+      /* Yesterday's heats are measured heating-to-holding, without the gap,
+       * so rank this heat the same way and show the gap on its own. */
+      var gapKwh = r.rows[3].kwh, secHeat = (r.kwh - gapKwh) / (TW.charge / 1000);
+      var rank = hs ? hs.heats.filter(function (h) { return h.sec != null && h.sec < secHeat; }).length : null;
+      document.getElementById("twin-out").innerHTML =
+        '<div class="tw-kpis">' +
+        '<div><span class="num tw-big">' + esc(fmt(r.sec, 0)) + '</span><span class="unit">kWh per tonne</span></div>' +
+        '<div><span class="num">' + esc(fmt(r.kwh, 0)) + '</span><span class="unit">kWh this heat</span></div>' +
+        '<div><span class="num">₹' + esc(fmt(r.inr + r.superKwh * (avgRate(periods) || 0), 0)) + '</span><span class="unit">at the tariff of those hours</span></div>' +
+        '<div><span class="num">' + esc(fmt(r.kwh * 0.71, 0)) + '</span><span class="unit">kg CO₂ (0.71 factor)</span></div></div>' +
+        '<div class="tw-bar">' + r.rows.map(function (x) {
+          return '<span class="seg s-' + x.state + '" style="flex-grow:' + x.kwh.toFixed(2) + '" title="' + esc(x.state) + '"></span>';
+        }).join("") + (r.superKwh ? '<span class="seg s-over" style="flex-grow:' + r.superKwh.toFixed(2) + '"></span>' : "") + "</div>" +
+        '<p class="tw-legend">' + r.rows.map(function (x) {
+          return esc(x.gap ? (TW.hot ? "gap kept hot" : "gap switched off") : x.state) + " " + esc(fmt(x.min, 0)) + " min · " + esc(fmt(x.kwh, 0)) + " kWh";
+        }).join("  |  ") + (r.superKwh ? "  |  extra superheat " + esc(fmt(r.superKwh, 1)) + " kWh" : "") + "</p>" +
+        (hs ? '<p class="tw-compare">Yesterday’s ' + hs.heats.length + " measured heats ran " + esc(fmt(hs.best, 0)) + "–" + esc(fmt(hs.worst, 0)) +
+          " kWh/t. This heat on its own is <b>" + esc(fmt(secHeat, 0)) + " kWh/t</b>, rank <b>" + (rank + 1) + " of " + (hs.heats.length + 1) + "</b>" + (rank === 0 ? ", better than all of them" : "") + ". The gap adds " + esc(fmt(gapKwh, 0)) + " kWh" + (TW.hot ? " because the furnace is kept hot." : " while switched off.") + "</p>" : "") +
+        '<p class="note">Model: the simulator’s furnace (rated ' + rated + " kW, melt rate 500 kg/h, power per state), " +
+        "superheat 0.33 kWh/t per °C above 1550 °C. " + badge("MODEL") + " " + badge("illustrative tariff") + "</p>";
+      if (twinCtx && !twinCtx.running) twinCtx.setState(1, TW.hot ? 1480 : 900, TW.hot ? 0.45 : 0.08);
+    }
+    ctl.querySelectorAll("input[type=range]").forEach(function (inp) {
+      inp.addEventListener("input", function () { TW[inp.getAttribute("data-k")] = Number(inp.value); show(); });
+    });
+    document.getElementById("tw-hot").addEventListener("change", function (e) { TW.hot = e.target.checked; show(); });
+    document.getElementById("tw-run").addEventListener("click", function () {
+      if (!twinCtx) return;
+      /* play the heat in ~8 s: heating (charge heats), melting (level rises), holding, gap */
+      var r = twinPlan(rated, periods), t0 = performance.now(), dur = 8000, total = r.minutes;
+      var bounds = [], acc = 0;
+      r.rows.forEach(function (x) { bounds.push([acc, acc + x.min, x]); acc += x.min; });
+      var label = document.getElementById("twin-phase");
+      twinCtx.running = true;
+      (function step(now) {
+        var m = Math.min(1, (now - t0) / dur) * total;
+        var cur = bounds.filter(function (b) { return m >= b[0] && m <= b[1]; })[0] || bounds[bounds.length - 1];
+        var st = cur[2].state, k = (m - cur[0]) / Math.max(cur[1] - cur[0], 1e-6);
+        var level = st === "heating" ? 0.15 : st === "melting" ? 0.15 + 0.85 * k : cur[2].gap && !TW.hot ? 0.15 : 1;
+        var temp = st === "heating" ? 600 + 600 * k : st === "melting" ? 1200 + (TW.tap - 1200) * k : cur[2].gap && !TW.hot ? 1480 - 700 * k : TW.tap - 50 * k;
+        var pw = FURNACE_MODEL.frac[st] || 0.08;
+        twinCtx.setState(level, temp, pw);
+        var clock = TW.start * 60 + m;
+        label.textContent = (cur[2].gap ? (TW.hot ? "gap, kept hot" : "gap, switched off") : st) + " · " +
+          String(Math.floor(clock / 60) % 24).padStart(2, "0") + ":" + String(Math.floor(clock % 60)).padStart(2, "0") +
+          " · " + fmt(rated * pw, 0) + " kW";
+        if (m < total) requestAnimationFrame(step); else { twinCtx.running = false; label.textContent += " · done"; }
+      })(t0);
+    });
+    show();
+    setChips("chips-twin", ["MODEL", "rated " + rated + " kW", "illustrative tariff", "updated " + fmtT(nowIso())]);
+  }
+
   async function loadOptimise() {
     var chart = document.getElementById("opt-chart");
     var strip = document.getElementById("opt-tariff");
@@ -593,37 +871,14 @@
       chart.innerHTML = naHtml();
       strip.innerHTML = "";
       explain.innerHTML = naHtml((machines && machines.error) || "no optimisation run yet");
-      loadRibbon("furnace-01", []);
       setChips("chips-optimise", ["updated " + fmtT(nowIso())]);
       return;
     }
-    var c = colors();
-    document.getElementById("opt-title").textContent = mid + " — current vs recommended (" + (run.status || "?") + ")";
-    var traces = schedBars(run.current_schedule || run.current, "current", c)
-      .concat(schedBars(run.recommended_schedule || run.recommended, "recommended", c));
+    document.getElementById("opt-title").textContent = mid + " — drag the heats, or let the optimiser plan (" + (run.status || "?") + ")";
     var tp = ((run.metrics || {}).tariff_periods) || [];
-    loadRibbon(mid, tp);
-    if (traces.length) {
-      /* Tariff periods drawn behind the heats: darker = dearer. */
-      var maxRate = Math.max.apply(null, tp.map(function (t) { return t.rate; }).concat([1]));
-      var bands = tp.filter(function (t) { return t.start_h != null; }).map(function (t) {
-        return { type: "rect", layer: "below", xref: "x", yref: "paper", x0: t.start_h, x1: t.end_h || 24, y0: 0, y1: 1,
-          fillcolor: c.accent, opacity: 0.05 + 0.2 * (t.rate / maxRate), line: { width: 0 } };
-      });
-      var bandLabels = tp.filter(function (t) { return t.start_h != null; }).map(function (t) {
-        return { x: (t.start_h + (t.end_h || 24)) / 2, y: 1.02, xref: "x", yref: "paper", showarrow: false,
-          text: "₹" + fmt(t.rate, 1) + "/kWh", font: { color: c.ink2, size: rem(0.8) } };
-      });
-      var lay = baseLayout({
-        shapes: bands, annotations: bandLabels,
-        barmode: "overlay", bargap: 0.3,
-        xaxis: { title: "hour of day", gridcolor: c.rule, range: [0, 24], dtick: 2 },
-        yaxis: { autorange: "reversed", automargin: true, ticksuffix: "  ", tickfont: { color: c.ink, size: rem(1.25) } },
-        legend: { orientation: "h", x: 0, y: -0.28, font: { color: c.ink2 } }
-      });
-      lay.margin = { l: rem(1), r: rem(1), t: rem(2.5), b: rem(3.5) };
-      plot("opt-chart", traces, lay);
-    } else { chart.innerHTML = naHtml(); }
+    var mrow = machines.filter(function (m) { return m.id === mid; })[0] || {};
+    if (mrow.rated_power_kw) renderPlanner(run, tp, mrow.rated_power_kw, mid);
+    else chart.innerHTML = naHtml("rated power not returned for " + mid);
     var illustrative = tp.length && tp.every(function (t) { return t.source_class === "ASSUMPTION"; });
     strip.innerHTML = tp.map(function (t) {
       return '<span class="chip">' + esc(t.period) + ' · <span class="num">' + esc(fmt(t.rate, 1)) + "</span> INR/kWh</span>";
@@ -918,11 +1173,8 @@
    * at the tariff period it falls in (Asia/Kolkata hour of day). */
   function rateAt(periods, iso) {
     var h = Number(px(iso).slice(11, 13)) + Number(px(iso).slice(14, 16)) / 60;
-    for (var i = 0; i < periods.length; i++) {
-      var p = periods[i], end = p.end_h || 24;
-      if (p.start_h != null && h >= p.start_h && h < end) return p.rate;
-    }
-    return null;
+    var per = periodAt(periods, h);
+    return per ? per.rate : null;
   }
   var STATE_TXT = { heating: "heating", melting: "melting", holding: "holding, no pour", idle: "idle" };
   async function loadRibbon(mid, periods) {
@@ -987,14 +1239,16 @@
     if (!v) { box.innerHTML = naHtml("no verified saving yet — run the demo first"); document.getElementById("pb-out").innerHTML = ""; return; }
     var kwhDay = v.counterfactual_kwh / v.n_post * 24;
     var factor = ((v.co2_impact || {}).factor || {}).value;
-    if (!PB) PB = { hw: 60000, sub: 1500, rate: avgRate ? Math.round(avgRate * 100) / 100 : 7.5, days: 300, kwhDay: Math.round(kwhDay), furnaces: 1 };
+    if (!PB) PB = { hw: 60000, sub: 1500, rate: avgRate ? Math.round(avgRate * 100) / 100 : 7.5, days: 300, kwhDay: Math.round(kwhDay), furnaces: 1, share: 30, years: 3 };
     var fields = [
       ["hw", "Hardware + install per site", "₹", 10000, 300000, 5000, "example input: meter, converter, gateway, fitting. Replace with a real quote."],
       ["sub", "JouleMitra subscription", "₹ / month", 0, 10000, 250, "example input"],
       ["rate", "Average tariff", "₹ / kWh", 4, 14, 0.25, avgRate ? "default = the site tariff averaged over 24 h (illustrative)" : "example input"],
       ["kwhDay", "Furnace energy per day", "kWh", 200, 10000, 50, "default = this furnace's expected use: " + fmt(v.counterfactual_kwh, 0) + " kWh over " + v.n_post + " h"],
       ["days", "Operating days per year", "days", 150, 365, 5, "example input"],
-      ["furnaces", "Furnaces per site", "", 1, 6, 1, "example input"]
+      ["furnaces", "Furnaces per site", "", 1, 6, 1, "example input"],
+      ["share", "Pay-from-savings: share to JouleMitra", "%", 0, 60, 5, "example input: the SME pays nothing upfront, only a share of verified savings"],
+      ["years", "Pay-from-savings: contract length", "years", 1, 5, 1, "example input"]
     ];
     box.innerHTML = '<div class="pb-fixed"><span class="num">' + esc(fmt(v.saving_pct, 1)) + ' %</span> less energy per tonne ' +
       badge("VERIFIED", "verified") + '<p class="note">The only measured input. Everything below is yours to change.</p></div>' +
@@ -1025,6 +1279,15 @@
         (months == null ? '<p class="note">The monthly saving does not cover the subscription at these inputs.</p>' : "") +
         '<p class="pb-line">Per site each year: <b class="num">' + fmt(kwhYr, 0) + ' kWh</b> and <b class="num">₹ ' + fmt(inrYr, 0) +
         "</b> saved" + (co2 != null ? ", <b class=\"num\">" + fmt(co2, 1) + " t CO₂</b> avoided (provisional grid factor " + fmt(factor, 2) + ")" : "") + ".</p>" +
+        (function () {
+          /* Pay-from-savings: only verified savings are shared, so the SME
+           * never pays for a saving that did not happen. */
+          var toJm = inrYr * PB.share / 100, keep = inrYr - toJm;
+          var rec = toJm > 0 ? PB.hw / (toJm / 12) : null;
+          return '<p class="pb-line pb-esco"><b>Pay from savings, no upfront cost:</b> the SME keeps <b class="num">₹ ' + fmt(keep, 0) +
+            "</b> a year from day one; JouleMitra receives " + PB.share + " % of verified savings, recovers the kit in <b class=\"num\">" +
+            (rec != null ? fmt(rec, 1) + " months" : "—") + "</b> and <b class=\"num\">₹ " + fmt(toJm * PB.years, 0) + "</b> over " + PB.years + " years.</p>";
+        })() +
         '<table class="pb-scale"><thead><tr><th>Rolled out to</th><th>Energy saved / yr</th><th>Money saved / yr</th><th>CO₂ avoided / yr</th></tr></thead><tbody>' + scale + "</tbody></table>" +
         '<p class="note">Projection: assumes every site matches the verified ' + fmt(v.saving_pct, 1) + " % and the inputs on the left. " + badge("PROJECTED", "projected") + "</p>";
     }
@@ -1055,13 +1318,605 @@
     if (el) openTrail(el.getAttribute("data-trail"));
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") closeTrail();
+    if (e.key === "Escape") { closeTrail(); closeFaults(); }
     var el = document.activeElement;
     if (e.key === "Enter" && el && el.getAttribute && el.getAttribute("data-trail")) openTrail(el.getAttribute("data-trail"));
   });
 
+  /* ================= shared: last 24 h of rows ================= */
+  async function day24(mid) {
+    var tel = await api("/telemetry", { machine_id: mid, limit: 400 });
+    if (!tel || tel.error || tel.length < 2) return [];
+    var rows = tel.slice().sort(function (a, b) { return new Date(a.ts) - new Date(b.ts); });
+    var t0 = new Date(rows[rows.length - 1].ts).getTime() - 24 * 3600 * 1000;
+    rows = rows.filter(function (r) { return new Date(r.ts).getTime() >= t0; });
+    /* energy of each slice = meter counter difference to the previous reading */
+    for (var i = 0; i < rows.length; i++) {
+      var d = i ? rows[i].energy_kwh - rows[i - 1].energy_kwh : null;
+      rows[i].dkwh = d != null && d >= 0 ? d : null;
+      rows[i].dh = i ? (new Date(rows[i].ts) - new Date(rows[i - 1].ts)) / 3600000 : null;
+    }
+    return rows.slice(1);
+  }
+  async function tariffPeriods() {
+    var run = await api("/optimization/schedule", { machine_id: "furnace-01" });
+    return (run && run.metrics && run.metrics.tariff_periods) || [];
+  }
+  function avgRate(periods) {
+    return periods.length ? periods.reduce(function (a, p) { return a + p.rate * ((p.end_h || 24) - p.start_h); }, 0) / 24 : null;
+  }
+
+  /* ================= 3. HEATS =================
+   * A heat = one heating -> melting -> holding run on the furnace's
+   * state sequence. Its energy is the meter counter over those slices; its
+   * output is the hourly production record shared out by the heat's
+   * melting minutes in that hour (DERIVED). */
+  /* Superheat estimate: liquid iron ~0.82 kJ/kg.K = 0.228 kWh/t per degC,
+   * at ~70 % furnace efficiency ~0.33 kWh/t per degC of overshoot. It agrees
+   * with BEE's ~20 kWh/t for ~60 degC of uncontrolled overshoot. */
+  var KWH_PER_T_PER_C = 0.33;
+  var HEAT_TARGET = 1550;
+  var PUB_BANDS = { best: [550, 625], typical: [625, 900] };
+  async function heatStats() {
+    var tel = await day24("furnace-01");
+    var prod = await api("/production", { machine_id: "furnace-01", limit: 48 });
+    var periods = await tariffPeriods();
+    if (!tel.length) return null;
+    var heats = [], cur = null;
+    tel.forEach(function (r) {
+      var st = r.machine_state;
+      if (st === "heating" && (!cur || cur.phase !== "heating")) {
+        cur = { start: r.ts, end: r.ts, kwh: 0, inr: 0, melt: [], hold: 0, peak: -Infinity, phase: "heating", slices: 0 };
+        heats.push(cur);
+      }
+      if (!cur) return;
+      if (st === "idle") { cur.phase = "done"; return; }
+      if (cur.phase === "done") return;
+      if (st === "holding" && cur.phase === "heating") return;
+      cur.phase = st;
+      cur.end = r.ts; cur.slices++;
+      if (r.dkwh != null) { cur.kwh += r.dkwh; var rt = rateAt(periods, r.ts); if (rt != null) cur.inr += r.dkwh * rt; }
+      if (st === "melting") cur.melt.push(r.ts);
+      if (st === "holding") cur.hold += r.dh * 60;
+      if (r.temperature_c != null && st !== "heating") cur.peak = Math.max(cur.peak, r.temperature_c);
+    });
+    heats = heats.filter(function (h) { return h.melt.length && h.phase === "done"; });
+    /* share hourly production by melting minutes */
+    var recs = (prod && !prod.error && (prod.production || prod.records || prod)) || [];
+    recs = recs instanceof Array ? recs : [];
+    heats.forEach(function (h) { h.kg = 0; h.good = 0; });
+    recs.forEach(function (p) {
+      var a = new Date(p.window_start).getTime(), b = new Date(p.window_end).getTime();
+      var inHour = heats.map(function (h) { return h.melt.filter(function (t) { var x = new Date(t).getTime(); return x > a && x <= b; }).length; });
+      var tot = inHour.reduce(function (s, n) { return s + n; }, 0);
+      if (!tot) return;
+      heats.forEach(function (h, i) { h.kg += p.qty_total_kg * inHour[i] / tot; h.good += p.qty_good_kg * inHour[i] / tot; });
+    });
+    heats.forEach(function (h) {
+      h.t = h.kg / 1000;
+      h.sec = h.t > 0 ? h.kwh / h.t : null;
+      h.over = h.peak > HEAT_TARGET ? h.peak - HEAT_TARGET : 0;
+      h.overKwh = h.over * KWH_PER_T_PER_C * h.t;
+      h.period = (periods.filter(function (p) { var x = rateAt([p], h.melt[Math.floor(h.melt.length / 2)]); return x != null; })[0] || {}).period;
+    });
+    var secs = heats.map(function (h) { return h.sec; }).filter(function (x) { return x != null; }).sort(function (a, b) { return a - b; });
+    var med = secs.length ? secs[Math.floor(secs.length / 2)] : null;
+    var best = secs.length ? secs[0] : null, worst = secs.length ? secs[secs.length - 1] : null;
+    var gapKwh = heats.reduce(function (s, h) { return s + (h.sec != null ? Math.max(0, h.sec - best) * h.t : 0); }, 0);
+    var overKwh = heats.reduce(function (s, h) { return s + h.overKwh; }, 0);
+    var ar = avgRate(periods);
+    return { heats: heats, med: med, best: best, worst: worst, gapKwh: gapKwh, overKwh: overKwh, ar: ar };
+  }
+  async function loadHeats() {
+    var tbl = document.getElementById("heats-table");
+    var S = await heatStats();
+    if (!S) { tbl.innerHTML = "<tr><td>" + naHtml("no furnace telemetry") + "</td></tr>"; return; }
+    var heats = S.heats, med = S.med, best = S.best, worst = S.worst, gapKwh = S.gapKwh, overKwh = S.overKwh, ar = S.ar;
+
+    /* benchmark scale: published ranges vs this furnace's heats */
+    var lo = 400, hi = 1000, pos = function (v) { return ((Math.min(Math.max(v, lo), hi) - lo) / (hi - lo) * 100).toFixed(2) + "%"; };
+    document.getElementById("heats-bench").innerHTML =
+      '<h2>Where these heats sit against published ranges</h2><div class="bench-scale">' +
+      '<span class="band best" style="left:' + pos(PUB_BANDS.best[0]) + ";width:calc(" + pos(PUB_BANDS.best[1]) + " - " + pos(PUB_BANDS.best[0]) + ')">best in class</span>' +
+      '<span class="band typ" style="left:' + pos(PUB_BANDS.typical[0]) + ";width:calc(" + pos(PUB_BANDS.typical[1]) + " - " + pos(PUB_BANDS.typical[0]) + ')">typical Indian foundry</span>' +
+      heats.filter(function (h) { return h.sec != null; }).map(function (h) { return '<i class="dot" style="left:' + pos(h.sec) + '"></i>'; }).join("") +
+      (med != null ? '<b class="med" style="left:' + pos(med) + '">median ' + esc(fmt(med, 0)) + "</b>" : "") +
+      "</div>" + '<div class="bench-axis">' + [400, 500, 600, 700, 800, 900, 1000].map(function (v) {
+        return '<span style="left:' + pos(v) + '">' + v + "</span>"; }).join("") + '<span class="u">kWh per tonne</span></div>' +
+      '<p class="note trace" data-trail="bench" tabindex="0">Ranges: BEE/SAMEEEKSHA foundry cluster studies and industry benchmarks. Each dot is one heat.</p>';
+    TRAILS.bench = { title: "Benchmark ranges", steps: [
+      ["Best in class", "550–625 kWh per tonne of molten metal (modern IGBT furnaces, good practice)"],
+      ["Typical", "625–900 kWh per tonne in Indian foundry clusters"],
+      ["Physics floor", "about 500–560 kWh per tonne just to melt and superheat iron"],
+      ["This furnace", heats.length + " heats; median " + fmt(med, 0) + " kWh/t (heat energy ÷ heat output)"]
+    ], source: "BEE/SAMEEEKSHA DPR (Batala-Jalandhar-Ludhiana cluster), CarbonMinus 2025 · heats from SIMULATED data" };
+
+    document.getElementById("heats-sum").innerHTML =
+      '<div class="kpi-card"><div class="kpi">' + esc(String(heats.length)) + '<span class="unit">heats</span></div><div class="kpi-label">in the last 24 h ' + badge("MEASURED", "accent") + "</div></div>" +
+      '<div class="kpi-card"><div class="kpi">' + esc(fmt(best, 0)) + " → " + esc(fmt(worst, 0)) + '<span class="unit">kWh/t</span></div><div class="kpi-label">best to worst heat ' + badge("DERIVED") + "</div></div>" +
+      '<div class="kpi-card"><div class="kpi hot-num">' + esc(fmt(gapKwh, 0)) + '<span class="unit">kWh</span></div><div class="kpi-label">if every heat ran like the best one' + (ar ? " ≈ ₹" + esc(fmt(gapKwh * ar, 0)) + " a day" : "") + "</div></div>" +
+      '<div class="kpi-card"><div class="kpi">' + esc(fmt(overKwh, 1)) + '<span class="unit">kWh</span></div><div class="kpi-label">spent above a ' + HEAT_TARGET + " °C target " + badge("ESTIMATE") + "</div></div>";
+
+    var worstH = heats.reduce(function (w, h) { return h.sec != null && (!w || h.sec > w.sec) ? h : w; }, null);
+    tbl.innerHTML = "<thead><tr><th>Heat</th><th>Started</th><th>Tariff</th><th class='r'>Energy</th><th class='r'>Output</th><th class='r'>kWh/t</th><th class='r'>Held after melt</th><th class='r'>Peak °C</th><th class='r'>Cost</th></tr></thead><tbody>" +
+      heats.map(function (h, i) {
+        TRAILS["heat" + i] = { title: "Heat " + (i + 1), steps: [
+          ["Span", fmtRange(h.start, h.end) + ", " + h.slices + " meter readings"],
+          ["Energy", fmt(h.kwh, 1) + " kWh = sum of meter-counter differences over heating, melting and holding"],
+          ["Output", fmt(h.kg, 0) + " kg = hourly production shared by this heat's melting minutes"],
+          ["Energy per tonne", fmt(h.kwh, 1) + " ÷ " + fmt(h.t, 3) + " t = " + fmt(h.sec, 0) + " kWh/t"],
+          ["Temperature", "peak " + fmt(h.peak, 0) + " °C; above " + HEAT_TARGET + " °C by " + fmt(h.over, 0) + " °C ≈ " + fmt(h.overKwh, 2) + " kWh (0.33 kWh/t per °C estimate)"],
+          ["Cost", "each slice priced at its tariff period: ₹" + fmt(h.inr, 0)]
+        ], source: "GET /telemetry, GET /production, tariff from GET /optimization/schedule · SIMULATED data" };
+        var bad = h === worstH;
+        return '<tr class="' + (bad ? "worst" : "") + '"><td><span class="trace" data-trail="heat' + i + '" tabindex="0">' + (i + 1) + "</span></td><td>" + esc(fmtT(h.start)) +
+          "</td><td>" + esc((h.period || "—").replace(/_/g, " ")) + '</td><td class="r num">' + esc(fmt(h.kwh, 0)) + ' kWh</td><td class="r num">' + esc(fmt(h.kg, 0)) +
+          ' kg</td><td class="r num strong">' + esc(fmt(h.sec, 0)) + '</td><td class="r num' + (h.hold > 40 ? " hot" : "") + '">' + esc(fmt(h.hold, 0)) + ' min</td><td class="r num' + (h.over > 15 ? " hot" : "") + '">' +
+          esc(fmt(h.peak, 0)) + '</td><td class="r num">₹' + esc(fmt(h.inr, 0)) + "</td></tr>";
+      }).join("") + "</tbody>";
+    setChips("chips-heats", ["SIMULATED data", "furnace-01", "illustrative tariff", "updated " + fmtT(nowIso())]);
+  }
+
+  /* ================= 4. BILL ================= */
+  async function loadBill() {
+    var periods = await tariffPeriods();
+    loadRibbon("furnace-01", periods);
+    var mids = ["furnace-01", "compressor-01", "pump-01"];
+    var days = await Promise.all(mids.map(day24));
+    var ar = avgRate(periods);
+    /* kVAh per slice from kWh and kvar x hours; billing on kVAh charges the difference */
+    var kwh = 0, kvah = 0, byTs = {}, low = [];
+    days.forEach(function (rows, i) {
+      var m = { mid: mids[i], kw: 0, kvar: 0, n: 0 };
+      rows.forEach(function (r) {
+        if (r.dkwh == null || r.reactive_power_kvar == null) return;
+        var q = r.reactive_power_kvar * r.dh;
+        kwh += r.dkwh; kvah += Math.sqrt(r.dkwh * r.dkwh + q * q);
+        var k = px(r.ts).slice(0, 15) + (Number(px(r.ts)[15]) < 5 ? "0" : "5");
+        byTs[k] = (byTs[k] || 0) + Math.sqrt(r.power_kw * r.power_kw + r.reactive_power_kvar * r.reactive_power_kvar);
+        if (r.power_factor != null && r.power_factor < 0.9) { m.kw += r.power_kw; m.kvar += r.reactive_power_kvar; m.n++; }
+      });
+      if (m.n) low.push(m);
+    });
+    var pf = kvah ? kwh / kvah : null;
+    /* capacitor needed to lift the low-PF periods to 0.95: Q = P(tan phi1 - tan phi2) */
+    var capHtml = low.map(function (m) {
+      var p = m.kw / m.n, q = m.kvar / m.n, need = Math.max(0, q - p * Math.tan(Math.acos(0.95)));
+      return "<li><b>" + esc(m.mid) + "</b>: PF " + esc(fmt(p / Math.sqrt(p * p + q * q), 2)) + " in low-PF periods; about <b class='num'>" + esc(fmt(need, 0)) + " kVAr</b> of capacitors lifts it to 0.95</li>";
+    }).join("");
+    /* maximum demand: highest 30-minute average of total kVA */
+    var keys = Object.keys(byTs).sort(), md = null, mdAt = null;
+    for (var i = 5; i < keys.length; i++) {
+      var avg = keys.slice(i - 5, i + 1).reduce(function (s, k) { return s + byTs[k]; }, 0) / 6;
+      if (md == null || avg > md) { md = avg; mdAt = keys[i]; }
+    }
+    document.getElementById("bill-pf").innerHTML =
+      '<div class="kpi"><span class="num">' + esc(fmt(pf, 2)) + '</span><span class="unit">average power factor</span></div>' +
+      '<p>Metered <b class="num">' + esc(fmt(kwh, 0)) + " kWh</b> is <b class='num'>" + esc(fmt(kvah, 0)) + " kVAh</b>. Where the utility bills kVAh, that gap costs about <b class='num hot'>₹" +
+      esc(fmt((kvah - kwh) * (ar || 0), 0)) + "</b> a day " + badge("illustrative tariff") + "</p>" +
+      (capHtml ? '<ul class="bill-list">' + capHtml + "</ul>" : "") +
+      "<p>Peak demand: <b class='num'>" + esc(fmt(md, 0)) + " kVA</b> (30-minute average) ending " + esc(mdAt ? mdAt.slice(11) : "—") +
+      '. <span class="note">The tariff data has no demand charge, so no rupee figure is shown for it.</span></p>';
+
+    /* scrap: electricity that went into rejected castings */
+    var prod = await api("/production", { machine_id: "furnace-01", limit: 24 });
+    var recs = (prod && !prod.error && (prod.production || prod.records || prod)) || [];
+    recs = recs instanceof Array ? recs : [];
+    var tot = recs.reduce(function (s, p) { return s + (p.qty_total_kg || 0); }, 0);
+    var rej = recs.reduce(function (s, p) { return s + (p.qty_rejected_kg || 0); }, 0);
+    var good = recs.reduce(function (s, p) { return s + (p.qty_good_kg || 0); }, 0);
+    var fkwh = days[0].reduce(function (s, r) { return s + (r.dkwh || 0); }, 0);
+    var share = tot ? rej / tot : null;
+    document.getElementById("bill-reject").innerHTML = share == null ? naHtml("no production records") :
+      '<div class="kpi"><span class="num">' + esc(fmt(share * 100, 1)) + ' %</span><span class="unit">of output rejected</span></div>' +
+      "<p><b class='num'>" + esc(fmt(fkwh * share, 0)) + " kWh</b> (₹" + esc(fmt(fkwh * share * (ar || 0), 0)) +
+      ") of today's furnace electricity went into castings that were scrapped.</p>" +
+      "<p>At the ~10 % rejection BEE reports for foundry clusters, the same furnace would lose <b class='num'>" + esc(fmt(fkwh * 0.10, 0)) +
+      " kWh</b> a day. Every point of rejection cut is energy saved per good tonne.</p>" +
+      '<p class="note">' + badge("MEASURED energy", "accent") + " " + badge("SIMULATED output") + "</p>";
+
+    /* carbon per tonne of good castings (electricity, Scope 2) */
+    var efs = await api("/emission-factors");
+    var f = ((efs && efs.emission_factors) || []).slice(-1)[0];
+    var pkwh = days.reduce(function (s, rows) { return s + rows.reduce(function (a, r) { return a + (r.dkwh || 0); }, 0); }, 0);
+    var tGood = good / 1000;
+    var tco2 = f ? pkwh * f.value_kg_per_kwh / 1000 : null;
+    var per = tco2 != null && tGood ? tco2 / tGood : null;
+    document.getElementById("bill-carbon").innerHTML = per == null ? naHtml("emission factor or output missing") :
+      '<div class="kpi"><span class="num">' + esc(fmt(per, 2)) + '</span><span class="unit">t CO₂ per tonne of good castings</span></div>' +
+      "<p>" + esc(fmt(pkwh, 0)) + " kWh for " + esc(fmt(tGood, 2)) + " t good output, grid factor " + esc(fmt(f.value_kg_per_kwh, 2)) + " " + esc(f.unit) + " (" + esc(f.version) +
+      ", provisional). Electricity only: an EU CBAM declaration also needs direct emissions and purchased inputs.</p>" +
+      '<button type="button" class="btn" id="carbon-csv">Download carbon statement (CSV)</button>';
+    document.getElementById("carbon-csv").addEventListener("click", function () {
+      var lines = [
+        ["field", "value"], ["period_end", nowIso()], ["scope", "Scope 2 electricity only"],
+        ["machines", mids.join(" ")], ["electricity_kwh", pkwh.toFixed(1)], ["good_output_t", tGood.toFixed(3)],
+        ["grid_factor", f.value_kg_per_kwh], ["grid_factor_unit", f.unit], ["grid_factor_version", f.version],
+        ["grid_factor_source_class", f.source_class], ["tco2", tco2.toFixed(3)], ["tco2_per_t_good", per.toFixed(3)],
+        ["data_source", "SIMULATED"], ["note", "provisional factor; not for external accounting until confirmed"]
+      ];
+      var blob = new Blob([lines.map(function (l) { return l.join(","); }).join("\n")], { type: "text/csv" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = "joulemitra-carbon-statement.csv"; a.click();
+      URL.revokeObjectURL(a.href);
+    });
+    setChips("chips-bill", ["SIMULATED data", "illustrative tariff", "updated " + fmtT(nowIso())]);
+  }
+
+  /* compressor energy while the furnace was idle or holding (Detect) */
+  async function airStats() {
+    var f = await day24("furnace-01"), c = await day24("compressor-01");
+    var fState = {};
+    f.forEach(function (r) { fState[px(r.ts).slice(0, 16)] = r.machine_state; });
+    var kwh = 0, h = 0;
+    c.forEach(function (r) {
+      var s = fState[px(r.ts).slice(0, 16)];
+      if ((s === "idle" || s === "holding") && r.dkwh != null) { kwh += r.dkwh; h += r.dh; }
+    });
+    return { kwh: kwh, h: h };
+  }
+  async function loadAir() {
+    var el = document.getElementById("detect-air");
+    var a = await airStats(), kwh = a.kwh, h = a.h;
+    el.innerHTML = h ? "<h3>Compressed air with the furnace stopped</h3><p>The compressor ran <b class='num'>" + esc(fmt(h, 1)) +
+      " h</b> and used <b class='num hot'>" + esc(fmt(kwh, 0)) + " kWh</b> while the furnace was idle or holding. " +
+      "Check for leaks and tools left on: a single ¼-inch leak can cost lakhs a year.</p>" : "";
+  }
+
+  /* ================= 7. MORNING BRIEF =================
+   * Yesterday's three biggest actions, ranked by rupees, as the message a
+   * supervisor would get on the phone. Every number comes from the same
+   * calculations as the Detect, Heats, Bill and Optimise screens. Replying
+   * "approve" records the decision through the normal recommendation API.
+   * Sending (WhatsApp Business / SMS) is not connected: this is a preview.
+   * Tamil and Hindi wording: machine-drafted, to be checked by a native
+   * speaker before any real use. */
+  var BRIEF_TXT = {
+    en: {
+      hello: "Good morning. Yesterday the plant used {kwh} kWh, about ₹{inr}. Top actions for today:",
+      air: "Compressor ran {h} h while the furnace was stopped: {kwh} kWh (≈₹{inr}). Check for air leaks and switch it off between heats.",
+      hold: "Furnace was kept hot with no pour for {h} h: {kwh} kWh (≈₹{inr}). Switch it off in long idle gaps.",
+      heats: "Heat {n} used {sec} kWh/t; the best heat used {best}. Running every heat like the best saves about ₹{inr} a day.",
+      sched: "Start heats at the planned times to miss the evening rate: about ₹{inr} a day (projected).",
+      pf: "Power factor is {pf}. If the bill is in kVAh this costs about ₹{inr} a day. Ask your electrician about capacitors.",
+      reply: "Reply 1, 2 or 3 to approve an action. Nothing changes on the machines without you.",
+      approved: "Approved", approve: "Approve",
+      title: "Morning brief", sub: "The three biggest money actions from yesterday, as the supervisor reads them on the phone.",
+      whyH: "How the three were picked",
+      whyNote: "Every candidate from the other screens, ranked by rupees. Approving records a real decision, the same as on the Act screen.",
+      preview: "Preview. Sending needs a WhatsApp Business or SMS account, which this demo does not connect. Tamil and Hindi wording to be checked by a native speaker.",
+      noRec: "no open recommendation to approve", details: "details", to: "plant supervisor"
+    },
+    ta: {
+      hello: "காலை வணக்கம். நேற்று ஆலை {kwh} kWh மின்சாரம் பயன்படுத்தியது, சுமார் ₹{inr}. இன்று செய்ய வேண்டியவை:",
+      air: "உலை நின்றிருந்தபோது கம்ப்ரஸர் {h} மணி நேரம் ஓடியது: {kwh} kWh (≈₹{inr}). காற்று கசிவைச் சரிபார்த்து, ஹீட்களுக்கு இடையில் அணைக்கவும்.",
+      hold: "ஊற்றாமல் உலை {h} மணி நேரம் சூடாக வைக்கப்பட்டது: {kwh} kWh (≈₹{inr}). நீண்ட இடைவேளைகளில் அணைக்கவும்.",
+      heats: "ஹீட் {n} டன்னுக்கு {sec} kWh எடுத்தது; சிறந்த ஹீட் {best}. எல்லா ஹீட்டும் சிறந்தது போல் ஓடினால் நாளுக்கு சுமார் ₹{inr} மிச்சம்.",
+      sched: "மாலை உச்ச கட்டணத்தைத் தவிர்க்க திட்டமிட்ட நேரத்தில் ஹீட்களைத் தொடங்கவும்: நாளுக்கு சுமார் ₹{inr} (கணிப்பு).",
+      pf: "பவர் ஃபேக்டர் {pf}. பில் kVAh-இல் இருந்தால் இதனால் நாளுக்கு சுமார் ₹{inr} செலவாகும். கேபாசிட்டர் பற்றி மின் பணியாளரிடம் கேளுங்கள்.",
+      reply: "ஒரு செயலை ஒப்புக்கொள்ள 1, 2 அல்லது 3 என பதில் அனுப்பவும். உங்கள் அனுமதி இல்லாமல் இயந்திரங்களில் எதுவும் மாறாது.",
+      approved: "ஒப்புதல் அளிக்கப்பட்டது", approve: "ஒப்புதல்",
+      title: "காலை அறிக்கை", sub: "நேற்றைய மிகப்பெரிய மூன்று செலவுச் செயல்கள், மேற்பார்வையாளர் தொலைபேசியில் படிப்பது போல.",
+      whyH: "இந்த மூன்றும் எப்படித் தேர்ந்தெடுக்கப்பட்டன",
+      whyNote: "மற்ற திரைகளில் உள்ள ஒவ்வொரு செயலும் ரூபாய் அடிப்படையில் வரிசைப்படுத்தப்பட்டுள்ளது. ஒப்புதல் அளித்தால் அது உண்மையான முடிவாகப் பதிவாகும், செயல் திரையில் உள்ளது போலவே.",
+      preview: "முன்னோட்டம். அனுப்ப WhatsApp Business அல்லது SMS கணக்கு தேவை; இந்த டெமோவில் அது இணைக்கப்படவில்லை. தமிழ், இந்தி வாசகங்களைத் தாய்மொழியாளர் சரிபார்க்க வேண்டும்.",
+      noRec: "ஒப்புதல் அளிக்கத் திறந்த பரிந்துரை இல்லை", details: "விவரம்", to: "ஆலை மேற்பார்வையாளர்"
+    },
+    hi: {
+      hello: "सुप्रभात। कल प्लांट में {kwh} kWh बिजली लगी, लगभग ₹{inr}। आज के ज़रूरी काम:",
+      air: "फ़र्नेस बंद रहने पर कंप्रेसर {h} घंटे चला: {kwh} kWh (≈₹{inr})। हवा का रिसाव जाँचें और हीट के बीच इसे बंद करें।",
+      hold: "बिना ढलाई के फ़र्नेस {h} घंटे गर्म रखी गई: {kwh} kWh (≈₹{inr})। लंबे खाली समय में इसे बंद करें।",
+      heats: "हीट {n} में प्रति टन {sec} kWh लगे, सबसे अच्छी हीट में {best}। हर हीट सबसे अच्छी जैसी चले तो रोज़ लगभग ₹{inr} बचेंगे।",
+      sched: "शाम की महँगी दर से बचने के लिए तय समय पर हीट शुरू करें: रोज़ लगभग ₹{inr} (अनुमान)।",
+      pf: "पावर फ़ैक्टर {pf} है। अगर बिल kVAh में है तो इससे रोज़ लगभग ₹{inr} ज़्यादा लगते हैं। कैपेसिटर के बारे में इलेक्ट्रीशियन से पूछें।",
+      reply: "किसी काम को मंज़ूरी देने के लिए 1, 2 या 3 भेजें। आपकी मंज़ूरी के बिना मशीनों पर कुछ नहीं बदलता।",
+      approved: "मंज़ूर", approve: "मंज़ूर करें",
+      title: "सुबह की रिपोर्ट", sub: "कल के सबसे बड़े तीन पैसे वाले काम, जैसे सुपरवाइज़र उन्हें फ़ोन पर पढ़ता है।",
+      whyH: "ये तीन कैसे चुने गए",
+      whyNote: "बाकी स्क्रीनों के हर काम को रुपयों के हिसाब से क्रम में रखा गया है। मंज़ूरी देने पर असली फ़ैसला दर्ज होता है, बिल्कुल Act स्क्रीन की तरह।",
+      preview: "पूर्वावलोकन। भेजने के लिए WhatsApp Business या SMS खाता चाहिए, जो इस डेमो में जुड़ा नहीं है। तमिल और हिंदी शब्दों की जाँच मूल भाषी से करवाएँ।",
+      noRec: "मंज़ूरी के लिए कोई खुली सिफ़ारिश नहीं", details: "विवरण", to: "प्लांट सुपरवाइज़र"
+    }
+  };
+  var briefLang = "en", briefCache = null;
+  function fill(tpl, v) { return tpl.replace(/\{(\w+)\}/g, function (_, k) { return v[k] != null ? v[k] : ""; }); }
+  async function briefActions() {
+    var periods = await tariffPeriods(), ar = avgRate(periods) || 0;
+    var res = await Promise.all([airStats(), heatStats(), day24("furnace-01"), day24("compressor-01"), day24("pump-01"),
+      api("/optimization/schedule", { machine_id: "furnace-01" }), api("/recommendations")]);
+    var air = res[0], hs = res[1], days = [res[2], res[3], res[4]], run = res[5];
+    var pend = ((res[6] && res[6].recommendations) || []).filter(function (r) { return r.status === "PENDING_REVIEW"; });
+    var pendFor = function (mid, rule) { return pend.filter(function (r) { return r.machine_id === mid && (!rule || r.rule_id === rule); })[0] || null; };
+    var acts = [];
+    if (air.h) acts.push({ k: "air", inr: air.kwh * ar, v: { h: fmt(air.h, 1), kwh: fmt(air.kwh, 0), inr: fmt(air.kwh * ar, 0) }, rec: pendFor("compressor-01"), screen: "detect" });
+    var hold = days[0].filter(function (r) { return r.machine_state === "holding" && r.dkwh != null; });
+    var hKwh = hold.reduce(function (s, r) { return s + r.dkwh; }, 0), hInr = hold.reduce(function (s, r) { return s + r.dkwh * (rateAt(periods, r.ts) || ar); }, 0);
+    if (hKwh) acts.push({ k: "hold", inr: hInr, v: { h: fmt(hold.reduce(function (s, r) { return s + r.dh; }, 0), 1), kwh: fmt(hKwh, 0), inr: fmt(hInr, 0) }, rec: pendFor("furnace-01", "R-IDLE"), screen: "bill" });
+    if (hs && hs.gapKwh) {
+      var worst = hs.heats.reduce(function (w, h) { return h.sec != null && (!w || h.sec > w.sec) ? h : w; }, null);
+      acts.push({ k: "heats", inr: hs.gapKwh * ar, v: { n: hs.heats.indexOf(worst) + 1, sec: fmt(worst.sec, 0), best: fmt(hs.best, 0), inr: fmt(hs.gapKwh * ar, 0) }, rec: null, screen: "heats" });
+    }
+    var m = (run && run.metrics) || {}, cur = valOf((m.current || {}).cost_inr), recC = valOf((m.recommended || {}).cost_inr);
+    if (cur != null && recC != null && cur > recC) acts.push({ k: "sched", inr: cur - recC, v: { inr: fmt(cur - recC, 0) }, rec: pendFor("furnace-01", "R-RESCHEDULE"), screen: "optimise", projected: true });
+    var kwh = 0, kvah = 0;
+    days.forEach(function (rows) { rows.forEach(function (r) {
+      if (r.dkwh == null || r.reactive_power_kvar == null) return;
+      var q = r.reactive_power_kvar * r.dh; kwh += r.dkwh; kvah += Math.sqrt(r.dkwh * r.dkwh + q * q);
+    }); });
+    if (kvah > kwh) acts.push({ k: "pf", inr: (kvah - kwh) * ar, v: { pf: fmt(kwh / kvah, 2), inr: fmt((kvah - kwh) * ar, 0) }, rec: null, screen: "bill" });
+    acts.sort(function (a, b) { return b.inr - a.inr; });
+    return { acts: acts, top: acts.slice(0, 3), kwh: kwh, inr: days.reduce(function (s, rows) { return s + rows.reduce(function (a, r) { return a + (r.dkwh || 0) * (rateAt(periods, r.ts) || ar); }, 0); }, 0) };
+  }
+  function renderBrief() {
+    var b = briefCache, T = BRIEF_TXT[briefLang];
+    [["brief-h1", "title"], ["brief-sub", "sub"], ["brief-why-h", "whyH"], ["brief-why-note", "whyNote"], ["brief-preview", "preview"]].forEach(function (p) {
+      var el = document.getElementById(p[0]);
+      el.textContent = T[p[1]];
+      el.setAttribute("lang", briefLang);
+    });
+    document.querySelectorAll(".lang button").forEach(function (x) { x.setAttribute("aria-pressed", String(x.getAttribute("data-lang") === briefLang)); });
+    document.getElementById("brief-msg").innerHTML = '<p class="msg-meta">JouleMitra → ' + esc(T.to) + ' · 07:00</p>' +
+      '<p lang="' + briefLang + '">' + esc(fill(T.hello, { kwh: fmt(b.kwh, 0), inr: fmt(b.inr, 0) })) + "</p><ol lang=\"" + briefLang + "\">" +
+      b.top.map(function (a) { return "<li>" + esc(fill(T[a.k], a.v)) + "</li>"; }).join("") + "</ol>" +
+      '<p class="msg-reply" lang="' + briefLang + '">' + esc(T.reply) + "</p>";
+    document.getElementById("brief-why").innerHTML = '<ol class="rank">' + b.acts.map(function (a, i) {
+      var inTop = i < 3;
+      return '<li class="' + (inTop ? "top" : "") + '"><span class="rank-inr num">₹' + esc(fmt(a.inr, 0)) + "</span>" +
+        '<span class="rank-what" lang="' + briefLang + '">' + esc(fill(T[a.k], a.v).split(/[.।]\s|:\s/)[0]) + ' <a href="#' + a.screen + '">' + esc(T.details) + "</a>" +
+        (a.projected ? " " + badge("PROJECTED", "projected") : "") + "</span>" +
+        (inTop && a.rec ? '<button type="button" class="btn sm" data-approve="' + esc(a.rec.id) + '">' + esc(T.approve) + " " + (i + 1) + "</button>"
+          : inTop ? '<span class="note">' + esc(T.noRec) + "</span>" : "") + "</li>";
+    }).join("") + "</ol>";
+    document.querySelectorAll("[data-approve]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        btn.disabled = true;
+        var r = await fetch("/recommendations/" + encodeURIComponent(btn.getAttribute("data-approve")) + "/acknowledge", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision: "APPROVED", note: "approved from the morning brief" }) });
+        btn.outerHTML = r.ok ? '<span class="badge verified">' + esc(T.approved) + " · " + esc(fmtT(nowIso())) + "</span>"
+          : '<span class="badge warn">not recorded (HTTP ' + r.status + ")</span>";
+      });
+    });
+  }
+  async function loadBrief() {
+    var ql = new URLSearchParams(window.location.search).get("lang");
+    if (ql && BRIEF_TXT[ql]) briefLang = ql;
+    briefCache = await briefActions();
+    document.querySelectorAll(".lang button").forEach(function (x) {
+      x.onclick = function () { briefLang = x.getAttribute("data-lang"); renderBrief(); };
+    });
+    renderBrief();
+    setChips("chips-brief", ["preview, not sent", "SIMULATED data", "illustrative tariff", "updated " + fmtT(nowIso())]);
+  }
+
+  /* ================= 1. PLANT: 3D floor =================
+   * The same three machines, meter panel, gateway and server as the wiring
+   * view, as an orbitable scene. Cable glow and the speed of the pulses on
+   * each cable follow that machine's live kW; a machine with an open alert
+   * turns orange. Click a machine for its numbers. */
+  var PLANT_VIEW = new URLSearchParams(window.location.search).get("view") === "3d" ? "3d" : "wiring";
+  var PLANT_ARGS = null, floorCtx = null;
+  function renderPlantView() {
+    if (!PLANT_ARGS) return;
+    document.querySelectorAll(".view-toggle button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-view") === PLANT_VIEW)); });
+    if (floorCtx) { floorCtx.stop(); floorCtx = null; }
+    if (PLANT_VIEW === "3d") renderPlant3d.apply(null, PLANT_ARGS);
+    else renderPlantDiagram.apply(null, PLANT_ARGS);
+  }
+  document.querySelectorAll(".view-toggle button").forEach(function (b) {
+    b.addEventListener("click", function () { PLANT_VIEW = b.getAttribute("data-view"); renderPlantView(); });
+  });
+  function renderPlant3d(rows, health, anoms, comp) {
+    var box = document.getElementById("plant-tiles");
+    if (!window.THREE) { box.innerHTML = naHtml("3D library missing"); return; }
+    box.innerHTML = '<div class="floor" id="floor"></div><div class="floor-labels" id="floor-labels"></div><div class="floor-card" id="floor-card" hidden></div>';
+    var el = document.getElementById("floor"), w = el.clientWidth, h = el.clientHeight;
+    /* Never fail as a silent white box: say why the 3D view is missing. */
+    function fail(why) {
+      box.innerHTML = '<p class="floor-fail">The 3D view could not start: ' + esc(why) +
+        '. Reload the page (Ctrl+F5); the Wiring view shows the same plant.</p>';
+    }
+    if (!w || !h) { fail("its area has no size yet"); return; }
+    var renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    } catch (err) { fail("WebGL is unavailable in this browser (" + (err && err.message || err) + ")"); return; }
+    var stopped = false;  // our own teardown also fires webglcontextlost; ignore that one
+    renderer.domElement.addEventListener("webglcontextlost", function (ev) {
+      ev.preventDefault();
+      if (stopped) return;
+      if (floorCtx) { floorCtx.stop(); floorCtx = null; }
+      fail("the browser took back its graphics context");
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); renderer.setSize(w, h); el.appendChild(renderer.domElement);
+    var scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(32, w / h, 0.1, 200);
+    cam.position.set(9, 10, 14);
+    var controls = new THREE.OrbitControls(cam, renderer.domElement);
+    controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.46;
+    scene.add(new THREE.HemisphereLight(0xf5f5f0, 0x4a5160, 0.95));
+    var sun = new THREE.DirectionalLight(0xffffff, 0.6); sun.position.set(6, 12, 8); scene.add(sun);
+    var floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(22, 12), new THREE.MeshStandardMaterial({ color: 0xe4e5df, roughness: 1 }));
+    floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.y = 0; scene.add(floorMesh);
+    var grid = new THREE.GridHelper(22, 22, 0xc9ccc4, 0xd6d8d2); grid.scale.z = 12 / 22; grid.position.y = 0.01; scene.add(grid);
+    var mat = function (c, o) { return new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.55, metalness: 0.3 }, o || {})); };
+    var alertM = {}; anoms.forEach(function (a) { alertM[a.machine_id] = true; });
+    var byId = {}; rows.forEach(function (m) { byId[m.machine_id] = m; });
+    var picks = [], labels = [], cables = [];
+    function group(x, z) { var g = new THREE.Group(); g.position.set(x, 0, z); scene.add(g); return g; }
+    /* furnace */
+    var fz = group(-6, 1);
+    var fBody = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 1.8, 40), mat(0x5b6470)); fBody.position.y = 0.9; fz.add(fBody);
+    var fMelt = new THREE.Mesh(new THREE.CircleGeometry(0.85, 40), mat(0xff8a2a, { emissive: 0xff6a10, emissiveIntensity: 0.9, metalness: 0 }));
+    fMelt.rotation.x = -Math.PI / 2; fMelt.position.y = 1.81; fz.add(fMelt);
+    for (var i = 0; i < 6; i++) { var ring = new THREE.Mesh(new THREE.TorusGeometry(1.16, 0.06, 8, 40), mat(0xb87333, { metalness: 0.85 })); ring.rotation.x = Math.PI / 2; ring.position.y = 0.3 + i * 0.26; fz.add(ring); }
+    /* compressor: receiver tank + skid */
+    var cz = group(0, 2.2);
+    var skid = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.9, 1.3), mat(0x2f6f8f)); skid.position.set(0, 0.45, 0); cz.add(skid);
+    var tank = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 2, 24), mat(0x9aa3ad)); tank.position.set(1.7, 1, 0); cz.add(tank);
+    /* pump + motor */
+    var pz = group(5.5, 1.5);
+    var motor = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.1, 24), mat(0x3b4b8a)); motor.rotation.z = Math.PI / 2; motor.position.set(-0.4, 0.5, 0); pz.add(motor);
+    var volute = new THREE.Mesh(new THREE.SphereGeometry(0.45, 20, 16), mat(0x7a828c)); volute.position.set(0.55, 0.5, 0); pz.add(volute);
+    /* meter panel, gateway, server */
+    var panel = group(-1, -3.8), pnl = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2, 0.5), mat(0xdfe2dc)); pnl.position.y = 1; panel.add(pnl);
+    var gw = group(3.2, -3.8), gwm = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.5), mat(0x2f5bd3)); gwm.position.y = 1.2; gw.add(gwm);
+    var srv = group(6.2, -3.8), srvm = new THREE.Mesh(new THREE.BoxGeometry(1, 2.2, 0.9), mat(0x1b2430)); srvm.position.y = 1.1; srv.add(srvm);
+    var parts = [["furnace-01", fz, fBody], ["compressor-01", cz, skid], ["pump-01", pz, motor]];
+    /* Centre the camera on the machines' bounding box, not the scene origin. */
+    var mbox = new THREE.Box3();
+    [fz, cz, pz].forEach(function (g) { mbox.expandByObject(g); });
+    var mctr = mbox.getCenter(new THREE.Vector3());
+    controls.target.set(mctr.x, 0.5, mctr.z);
+    parts.forEach(function (p) {
+      var m = byId[p[0]] || {};
+      if (alertM[p[0]]) p[2].material = mat(0xe8541c);
+      p[2].userData.mid = p[0]; picks.push(p[2]);
+      labels.push({ obj: p[1], y: 2.4, html: "<b>" + esc(m.machine_name || p[0]) + "</b><span>" + (m.latest_power_kw != null ? esc(fmt(m.latest_power_kw, 1)) + " kW" : "no reading") + "</span>", hot: alertM[p[0]] });
+      /* cable from the meter panel to the machine, lifted off the floor */
+      var a = new THREE.Vector3(-1, 0.15, -3.5), b = new THREE.Vector3(p[1].position.x, 0.15, p[1].position.z - 0.9);
+      var mid = a.clone().add(b).multiplyScalar(0.5); mid.y = 0.15;
+      var curve = new THREE.CatmullRomCurve3([a, new THREE.Vector3(a.x, 0.15, mid.z), new THREE.Vector3(b.x, 0.15, mid.z), b]);
+      var kw = m.latest_power_kw || 0, maxKw = Math.max.apply(null, rows.map(function (r) { return r.latest_power_kw || 0; }).concat([1]));
+      var cab = new THREE.Mesh(new THREE.TubeGeometry(curve, 60, 0.05 + 0.1 * kw / maxKw, 8, false),
+        mat(alertM[p[0]] ? 0xe8541c : 0x1b2430, { emissive: alertM[p[0]] ? 0xe8541c : 0x000000, emissiveIntensity: 0.4 }));
+      scene.add(cab);
+      var dots = [];
+      for (var k = 0; k < 4; k++) { var d = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), mat(0xfff1c2, { emissive: 0xffc861, emissiveIntensity: 1 })); scene.add(d); dots.push(d); }
+      cables.push({ curve: curve, dots: dots, speed: 0.02 + 0.25 * kw / maxKw });
+    });
+    labels.push({ obj: panel, y: 2.5, html: "<b>Meter panel</b><span>3 meters, CTs</span>" });
+    labels.push({ obj: gw, y: 2, html: "<b>Edge gateway</b><span>buffers if the link drops</span>" });
+    labels.push({ obj: srv, y: 2.8, html: "<b>JouleMitra server</b><span>API " + esc(comp.api || "—") + " · database " + esc(comp.database || "—") + "</span>" });
+    /* Ethernet: panel -> gateway -> server */
+    [[[-1, 1.6, -3.8], [3.2, 1.2, -3.8]], [[3.2, 1.2, -3.8], [6.2, 1.2, -3.8]]].forEach(function (s) {
+      var c = new THREE.LineCurve3(new THREE.Vector3().fromArray(s[0]), new THREE.Vector3().fromArray(s[1]));
+      scene.add(new THREE.Mesh(new THREE.TubeGeometry(c, 8, 0.04, 6, false), mat(0x2f5bd3)));
+    });
+    var lab = document.getElementById("floor-labels");
+    lab.innerHTML = labels.map(function (l, i) { return '<div class="flabel' + (l.hot ? " hot" : "") + '" id="fl' + i + '">' + l.html + "</div>"; }).join("");
+    var card = document.getElementById("floor-card"), ray = new THREE.Raycaster(), v = new THREE.Vector2();
+    renderer.domElement.addEventListener("click", function (e) {
+      var r = renderer.domElement.getBoundingClientRect();
+      v.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(v, cam);
+      var hit = ray.intersectObjects(picks)[0];
+      if (!hit) { card.hidden = true; return; }
+      var m = byId[hit.object.userData.mid] || {}, hh = health[hit.object.userData.mid] || {};
+      card.hidden = false;
+      card.innerHTML = "<b>" + esc(m.machine_name || hit.object.userData.mid) + "</b>" +
+        "<dl><dt>Now</dt><dd>" + esc(fmt(m.latest_power_kw, 1)) + " kW · " + esc(m.latest_state || "—") + "</dd>" +
+        "<dt>Energy today</dt><dd>" + esc(fmt(m.energy_kwh, 0)) + " kWh</dd>" +
+        "<dt>Health</dt><dd>" + (hh.health_score != null ? esc(fmt(hh.health_score, 0)) + " / 100" : "—") + "</dd>" +
+        "<dt>Open alerts</dt><dd>" + esc(String(m.open_alerts || 0)) + "</dd></dl>" +
+        '<a href="#' + (m.open_alerts ? "detect" : "health") + '">' + (m.open_alerts ? "See the alert" : "See its health") + "</a>";
+    });
+    var raf, t0 = performance.now(), tmp = new THREE.Vector3();
+    function loop(now) {
+      /* rAF's timestamp can be earlier than t0, and JS % keeps the sign, so
+       * a negative curve position crashed getPoint and killed this loop. */
+      var t = Math.max(0, (now - t0) / 1000);
+      cables.forEach(function (c) { c.dots.forEach(function (d, k) {
+        var u = ((t * c.speed) + k / c.dots.length) % 1;
+        d.position.copy(c.curve.getPoint(u < 0 ? u + 1 : u));
+      }); });
+      controls.update(); renderer.render(scene, cam);
+      labels.forEach(function (l, i) {
+        tmp.copy(l.obj.position); tmp.y = l.y; tmp.project(cam);
+        var n = document.getElementById("fl" + i);
+        if (n) { n.style.left = ((tmp.x + 1) / 2 * w) + "px"; n.style.top = ((1 - tmp.y) / 2 * h) + "px"; }
+      });
+      raf = requestAnimationFrame(loop);
+    }
+    raf = requestAnimationFrame(loop);
+    /* Release the WebGL context too: dispose() alone keeps it alive, and
+     * browsers cap live contexts (~16), so repeated reloads went blank. */
+    floorCtx = { stop: function () {
+      stopped = true;
+      cancelAnimationFrame(raf); renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove();
+    } };
+  }
+
+  /* ================= fault injection (demo mode) ================= */
+  var FAULT_WHERE = { air_leak: "detect", furnace_holding: "heats", furnace_wear: "health", restore: "plant" };
+  function openFaults() { closeTrail(); document.getElementById("faults").classList.add("open"); }
+  function closeFaults() { document.getElementById("faults").classList.remove("open"); }
+  document.getElementById("fault-open").addEventListener("click", openFaults);
+  document.getElementById("fault-close").addEventListener("click", closeFaults);
+  document.querySelectorAll("[data-fault]").forEach(function (b) {
+    b.addEventListener("click", async function () {
+      var fault = b.getAttribute("data-fault"), log = document.getElementById("fault-log");
+      document.querySelectorAll("[data-fault]").forEach(function (x) { x.disabled = true; });
+      log.innerHTML = "<p>" + esc(b.textContent) + ": rewriting the last 4 hours and running detection…</p>";
+      var r = await fetch("/demo/inject", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fault: fault, hours: 4 }) });
+      document.querySelectorAll("[data-fault]").forEach(function (x) { x.disabled = false; });
+      if (r.status === 404) { log.innerHTML = "<p class='hot'>Demo mode is off. Start the backend with DEMO_MODE=true to use this.</p>"; return; }
+      if (!r.ok) { log.innerHTML = "<p class='hot'>Failed: HTTP " + r.status + "</p>"; return; }
+      var out = await r.json(), where = FAULT_WHERE[fault];
+      log.innerHTML = "<p><b>Done.</b> " + esc(fmtRange(out.window_start, out.window_end)) + " rewritten as " + esc(out.scenario) + ".</p>" +
+        (out.events.length ? "<ul>" + out.events.map(function (e) {
+          return "<li><b>" + esc(e.machine_id) + "</b>: " + esc(ruleName(e.rule_id)) + (e.deviation_pct != null ? " (" + esc(signed(e.deviation_pct, 1)) + " %)" : "") + "</li>";
+        }).join("") + "</ul>" : "<p>No energy alert in this window" + (fault === "furnace_wear" ? "; wear shows up in machine health." : ".") + "</p>") +
+        '<p><a href="#' + where + '">See it on ' + esc(where) + "</a> · <a href=\"#plant\">plant</a> · <a href=\"#brief\">brief</a></p>";
+      show();
+    });
+  });
+
+  /* ?selftest=1: tariff wrap self-check (console only, no UI change). */
+  (function selftest() {
+    if (!new URLSearchParams(window.location.search).has("selftest")) return;
+    function eq(got, want, msg) { if (got !== want) throw new Error("selftest: " + msg + " (got " + got + ", want " + want + ")"); }
+    var wrap = [{ start_h: 22, end_h: 6, rate: 5 }, { start_h: 6, end_h: 22, rate: 8 }];
+    eq(periodAt(wrap, 2).rate, 5, "hour 2 -> 5");
+    eq(periodAt(wrap, 23).rate, 5, "hour 23 -> 5");
+    eq(periodAt(wrap, 10).rate, 8, "hour 10 -> 8");
+    var seed = [{ start_h: 0, end_h: 6, rate: 6 }, { start_h: 6, end_h: 18, rate: 7.5 },
+      { start_h: 18, end_h: 22, rate: 10.5 }, { start_h: 22, end_h: 0, rate: 6 }];
+    eq(periodAt(seed, 23.5).rate, 6, "hour 23.5 -> off-peak 6");
+    console.log("selftest ok");
+  })();
+
+  /* ?selftest=floor: rebuild the 3D floor 25 times in one page (past the
+   * ~16 live-WebGL-context cap) and check it still renders. */
+  /* ?selftest=fault: show the 3D floor, press the real "Air leak" button,
+   * then report what the floor panel holds after the reload that follows. */
+  (function faultSelftest() {
+    if (new URLSearchParams(window.location.search).get("selftest") !== "fault") return;
+    var tries = 0;
+    (function wait() {
+      if (!PLANT_ARGS) { if (++tries < 100) setTimeout(wait, 100); return; }
+      PLANT_VIEW = "3d"; renderPlantView();
+      document.querySelector('[data-fault="air_leak"]').click();
+      var n = 0;
+      (function poll() {
+        var log = document.getElementById("fault-log").textContent;
+        if (!/Done|Failed|off/.test(log) && ++n < 120) { setTimeout(poll, 500); return; }
+        setTimeout(function () {
+          var box = document.getElementById("plant-tiles");
+          console.log("faulttest: log=" + log.slice(0, 80) + " | canvas=" + !!box.querySelector("canvas") +
+            " | fail=" + (box.querySelector(".floor-fail") ? box.textContent.slice(0, 120) : "none") +
+            " | size=" + box.clientWidth + "x" + box.clientHeight + " | view=" + PLANT_VIEW);
+          closeFaults();
+        }, 4000);
+      })();
+    })();
+  })();
+
+  (function floorSelftest() {
+    if (new URLSearchParams(window.location.search).get("selftest") !== "floor") return;
+    var tries = 0;
+    (function wait() {
+      if (!PLANT_ARGS) { if (++tries < 100) setTimeout(wait, 100); return; }
+      PLANT_VIEW = "3d";
+      for (var i = 0; i < 25; i++) renderPlantView();
+      setTimeout(function () {
+        var ok = document.querySelector("#floor canvas") && !document.querySelector(".floor-fail");
+        console.log(ok ? "floortest ok" : "floortest FAILED: " + (document.getElementById("plant-tiles").textContent || "no canvas"));
+      }, 1500);
+    })();
+  })();
+
   /* ---------- router ---------- */
-  var loaders = { plant: loadPlant, detect: loadDetect, health: loadHealth, optimise: loadOptimise, act: loadAct, impact: loadImpact, payback: loadPayback };
+  var loaders = { plant: loadPlant, detect: loadDetect, health: loadHealth, optimise: loadOptimise, act: loadAct, impact: loadImpact, payback: loadPayback, heats: loadHeats, bill: loadBill, brief: loadBrief, twin: loadTwin };
   function current() {
     var h = (window.location.hash || "#plant").replace("#", "").split("?")[0];
     return SCREENS.indexOf(h) >= 0 ? h : "plant";
