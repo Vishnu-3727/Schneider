@@ -66,6 +66,10 @@ a:focus-visible { outline: var(--ring-width) solid var(--color-projected); outli
 .legend .projected::before { background: var(--color-projected); }
 .legend .verified::before { background: var(--color-verified); }
 .keys { position: absolute; right: var(--space-10); bottom: var(--space-2); margin: 0; font-size: var(--text-label); color: var(--color-ink-2); }
+/* Theme switcher lives at the stage bottom-left, same baseline as .keys
+ * (bottom-right), so the topbar keeps its original 4-column layout. */
+.stage > .theme-switch { position: absolute; left: var(--space-10); bottom: var(--space-2); margin: 0; align-items: center; font-size: var(--text-label); color: var(--color-ink-2); }
+.stage > .theme-switch button { padding: 0 var(--space-2); font-size: var(--text-label); }
 
 /* ---- screens ---- */
 .screens { min-height: 0; position: relative; }
@@ -288,6 +292,8 @@ html.static .d-flow { animation: none; }
 /* ---- 4 twin ---- */
 #screen-twin .screen-body { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--space-8); }
 .twin-stage { position: relative; padding: 0; overflow: hidden; background: radial-gradient(circle at 50% 35%, var(--color-sheet), var(--color-paper)); }
+/* Direction B: flat control-room surfaces — no glow, no gradients. */
+html[data-theme="b"] .twin-stage { background: var(--color-sheet); }
 .twin-3d { position: absolute; inset: 0; cursor: grab; }
 .twin-3d:active { cursor: grabbing; }
 .twin-phase { position: absolute; left: var(--space-5); bottom: var(--space-4); margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--color-sheet); padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill); border: var(--border-thin) solid var(--color-rule); }
@@ -318,6 +324,8 @@ html.static .d-flow { animation: none; }
 .pl-ctl { display: flex; gap: var(--space-4); align-items: center; font-size: 0.9rem; }
 .pl-ctl label { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; }
 .pl-ctl input[type=number] { width: 3.5rem; font: inherit; padding: 0.15rem var(--space-2); border: var(--border-thin) solid var(--color-ink-3); border-radius: 4px; }
+/* Direction B: keep form fields on the dark sheet instead of the light UA default. */
+html[data-theme="b"] .pl-ctl input[type=number] { background: var(--color-paper); color: var(--color-ink); }
 .pl-ctl input[type=range] { width: 8rem; accent-color: var(--color-projected); }
 .pl-ctl output { min-width: 3.5rem; font-variant-numeric: tabular-nums; }
 .btn.ghost { border-color: var(--color-rule); }
@@ -340,10 +348,11 @@ html.static .d-flow { animation: none; }
 /* ---- 8 brief ---- */
 #screen-brief .screen-body { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--space-10); }
 .brief-left { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; }
-.lang { display: flex; gap: var(--space-2); }
-.lang button { font: inherit; font-weight: 600; padding: var(--space-1) var(--space-4); border-radius: var(--radius-pill); border: var(--border-thin) solid var(--color-ink-3); background: var(--color-sheet); color: var(--color-ink); cursor: pointer; }
-.lang button[aria-pressed="true"] { background: var(--color-ink); color: var(--color-sheet); border-color: var(--color-ink); }
-.lang button:focus-visible { outline: var(--ring-width) solid var(--color-projected); outline-offset: 2px; }
+.lang, .theme-switch { display: flex; gap: var(--space-2); }
+.lang button, .theme-switch button { font: inherit; font-weight: 600; padding: var(--space-1) var(--space-4); border-radius: var(--radius-pill); border: var(--border-thin) solid var(--color-ink-3); background: var(--color-sheet); color: var(--color-ink); cursor: pointer; }
+.lang button[aria-pressed="true"], .theme-switch button[aria-pressed="true"] { background: var(--color-ink); color: var(--color-sheet); border-color: var(--color-ink); }
+.lang button:focus-visible, .theme-switch button:focus-visible { outline: var(--ring-width) solid var(--color-projected); outline-offset: 2px; }
+html.static .theme-switch { display: none; }
 .msg { flex: 1; min-height: 0; background: var(--color-sheet); border: var(--border-thin) solid var(--color-rule); border-radius: 1.1rem 1.1rem 1.1rem 0.25rem; padding: var(--space-5) var(--space-6); font-size: 1.05rem; line-height: 1.55; overflow: auto; }
 .msg p { margin: 0 0 var(--space-3) 0; }
 .msg ol { margin: 0 0 var(--space-3) 0; padding-left: var(--space-6); }
@@ -459,6 +468,225 @@ html.static .trail { transition: none; }
 @media (prefers-reduced-motion: reduce) { .screen.active { animation: none; } .trail { transition: none; } }
 html.static .screen.active { animation: none; }
 
+/* Direction C — Stat-led bento (docs/DESIGN_DIRECTIONS.md §2C).
+ * Every rule here is scoped to html[data-theme=c]: default and theme B
+ * are untouched. One hero tile per screen carries the screen's answer
+ * number; supporting tiles use irregular spans (never equal 3-col grids).
+ * Provenance discipline kept: hero takes the screen's main colour
+ * (measured=molten, projected=blueprint, verified=green) while supporting
+ * figures keep their own colours; warn keeps its critical role.
+ * Flat surfaces only: no gradients, glows or drop-shadow stacks. */
+html[data-theme=c] .twin-stage { background: var(--color-sheet); }
+html[data-theme=c] .brand-mark { box-shadow: none; border: 2px solid var(--color-accent-soft); }
+html[data-theme=c] .pl-block { box-shadow: none; border: var(--border-thin) solid var(--color-rule); }
+html[data-theme=c] .pl-block.drag:hover { box-shadow: none; border-color: var(--color-projected); }
+html[data-theme=c] .pl-block.held { box-shadow: none; border-color: var(--color-projected); }
+html[data-theme=c] .s-idle { background: var(--color-paper); color: var(--color-ink-2); }
+html[data-theme=c] .rule-code { font-family: var(--font-mono); }
+html[data-theme=c] .step-ts { font-family: var(--font-mono); }
+html[data-theme=c] .msg-meta { font-family: var(--font-mono); }
+
+/* Generic JS-injected hero tile (plant, detect, health, act only). */
+html[data-theme=c] .c-hero {
+  background: var(--color-sheet);
+  border: var(--border-thin) solid var(--color-rule);
+  border-radius: var(--radius-hero);
+  padding: var(--space-5) var(--space-6);
+  display: flex; flex-direction: column; justify-content: center; gap: var(--space-1);
+  min-height: 0; min-width: 0; overflow: hidden;
+}
+html[data-theme=c] .c-hero .c-label { font-size: var(--text-label); font-weight: 700; color: var(--color-ink-2); font-variation-settings: "wdth" var(--wdth-label); }
+html[data-theme=c] .c-hero .c-num {
+  font-family: var(--font-numerals); font-variation-settings: "wdth" var(--wdth-display);
+  font-variant-numeric: tabular-nums; font-weight: 900;
+  font-size: 4.5rem; line-height: 0.95; letter-spacing: -0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+html[data-theme=c] .c-hero .c-sub { font-size: var(--text-label); color: var(--color-ink-2); }
+html[data-theme=c] .c-hero[data-prov=measured] .c-num { color: var(--color-accent); }
+html[data-theme=c] .c-hero[data-prov=projected] .c-num { color: var(--color-projected); }
+html[data-theme=c] .c-hero[data-prov=verified] .c-num { color: var(--color-verified); }
+html[data-theme=c] .c-hero[data-prov=neutral] .c-num { color: var(--color-ink); }
+
+/* 1 Plant — compact hero tile in the top band beside the KPI row (roughly
+ * KPI-tile height); the wiring diagram keeps the full width at normal size. */
+html[data-theme=c] #screen-plant .screen-body { grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: auto auto minmax(0, 1fr); gap: var(--space-4); }
+html[data-theme=c] #screen-plant .c-hero[data-hero=plant] { grid-column: 1; grid-row: 1; padding: var(--space-3) var(--space-4); }
+html[data-theme=c] #screen-plant .c-hero[data-hero=plant] .c-num { font-size: 2.5rem; }
+html[data-theme=c] #plant-kpis { grid-column: 2 / -1; grid-row: 1; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+html[data-theme=c] #screen-plant .attn { grid-column: 1 / -1; grid-row: 2; }
+html[data-theme=c] #screen-plant .plant-wrap { grid-column: 1 / -1; grid-row: 3; min-height: 0; }
+html[data-theme=c] #screen-plant .d-kw { font-variation-settings: "wdth" var(--wdth-display); }
+
+/* 2 Detect — hero-top: largest deviation % (JS hero, molten). */
+html[data-theme=c] #screen-detect .screen-body { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--space-8) var(--space-4); }
+html[data-theme=c] #screen-detect .c-hero[data-hero=detect] { grid-column: 1 / -1; grid-row: 1; min-height: 9rem; }
+html[data-theme=c] #screen-detect .c-hero[data-hero=detect] .c-num { font-size: 4rem; }
+html[data-theme=c] #screen-detect .screen-body > .panel:first-of-type { grid-column: 1; grid-row: 2; min-height: 0; }
+html[data-theme=c] #screen-detect .screen-body > .panel:last-of-type { grid-column: 2; grid-row: 2; min-height: 0; overflow: auto; }
+
+/* 3 Heats — bench spans wider, KPI tiles narrower; the best→worst hero
+ * stays on one line (nowrap, reduced size). */
+html[data-theme=c] #screen-heats .heats-top { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--space-4); }
+html[data-theme=c] #screen-heats .heats-sum { grid-template-columns: 1fr 2.2fr 1fr; gap: var(--space-4); }
+html[data-theme=c] #screen-heats .heats-sum .kpi-card:nth-child(2) {
+  background: var(--color-sheet); border: var(--border-thin) solid var(--color-rule);
+  border-radius: var(--radius-hero); padding: var(--space-4) var(--space-5);
+  grid-row: span 2; min-width: 0; overflow: hidden;
+}
+html[data-theme=c] #screen-heats .heats-sum .kpi-card:nth-child(2) .kpi { font-size: 1.7rem; font-weight: 900; font-variation-settings: "wdth" var(--wdth-display); color: var(--color-accent); line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html[data-theme=c] #screen-heats .heats-sum .kpi-card:nth-child(2) .kpi .unit { display: block; margin: var(--space-1) 0 0 0; }
+html[data-theme=c] #screen-heats .bench { border-top: 2px solid var(--color-ink); padding-top: var(--space-3); }
+
+/* 4 Twin — hero-right: simulated heat cost ₹ (molten). */
+html[data-theme=c] #screen-twin .screen-body { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: var(--space-4); }
+html[data-theme=c] #screen-twin .twin-stage { min-height: 0; }
+html[data-theme=c] #screen-twin .twin-out {
+  background: var(--color-sheet); border: var(--border-thin) solid var(--color-rule);
+  border-radius: var(--radius-hero); padding: var(--space-5) var(--space-6);
+}
+html[data-theme=c] #screen-twin .tw-kpis { grid-template-columns: 1.6fr 1fr 1fr; gap: var(--space-8) var(--space-4); }
+html[data-theme=c] #screen-twin .tw-kpis .tw-big { font-size: 3.2rem; font-variation-settings: "wdth" var(--wdth-display); }
+
+/* 5 Bill — hero-top: last-24h ₹ ribbon total (molten). */
+html[data-theme=c] #screen-bill .ribbon-wrap {
+  background: var(--color-sheet); border: var(--border-thin) solid var(--color-rule);
+  border-radius: var(--radius-hero);
+}
+html[data-theme=c] #screen-bill .ribbon-sum .num { font-size: 3.5rem; font-weight: 900; font-variation-settings: "wdth" var(--wdth-display); line-height: 1; }
+html[data-theme=c] #screen-bill .bill-grid { grid-template-columns: 1.5fr 1fr 0.9fr; gap: var(--space-4); }
+
+/* 6 Health — hero-left: lowest health score (neutral ink; bars keep own state). */
+html[data-theme=c] #screen-health .screen-body { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--space-4); }
+html[data-theme=c] #screen-health .c-hero[data-hero=health] { grid-column: 1; }
+html[data-theme=c] #screen-health .screen-body > .panel { min-height: 0; overflow: auto; }
+
+/* 7 Plan — hero-top: projected Δ₹ (blueprint; existing .opt-hero). */
+html[data-theme=c] #screen-optimise .opt-hero {
+  background: var(--color-sheet); border: var(--border-thin) solid var(--color-rule);
+  border-radius: var(--radius-hero); padding: var(--space-5) var(--space-6);
+  align-items: center;
+}
+html[data-theme=c] #screen-optimise .opt-hero .hero-delta { font-size: 4rem; line-height: 0.95; }
+html[data-theme=c] #screen-optimise .pl-live { gap: var(--space-4); }
+
+/* 8 Brief — hero is the message card itself (body face, ink; never expanded). */
+html[data-theme=c] #screen-brief .screen-body { grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.9fr); gap: var(--space-4); }
+html[data-theme=c] #screen-brief .msg {
+  border-radius: var(--radius-hero); font-family: var(--font-body);
+  font-size: 1.15rem; border-width: var(--border-thin);
+}
+html[data-theme=c] #screen-brief .rank li { grid-template-columns: 5.5rem 1fr auto; }
+html[data-theme=c] #screen-brief .rank li.top .rank-inr { font-variation-settings: "wdth" var(--wdth-display); }
+
+/* 9 Act — hero-top-left: current step k of 5 (neutral ink). */
+html[data-theme=c] #screen-act .screen-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--space-8) var(--space-4); }
+html[data-theme=c] #screen-act .c-hero[data-hero=act] { grid-column: 1; grid-row: 1; }
+html[data-theme=c] #screen-act .stepper { grid-column: 2; grid-row: 1; }
+html[data-theme=c] #screen-act #act-cols { grid-column: 1 / -1; grid-row: 2; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-4); }
+
+/* 10 Prove — hero-top: verified kWh + stamp (green). */
+html[data-theme=c] #screen-impact .screen-body { gap: var(--space-8) var(--space-4); }
+html[data-theme=c] #screen-impact .impact-hero { border-radius: var(--radius-hero); gap: var(--space-4) var(--space-8); }
+html[data-theme=c] #screen-impact .hero-num { font-size: 5rem; font-variation-settings: "wdth" var(--wdth-display); }
+html[data-theme=c] #screen-impact .impact-cards { grid-template-columns: 1.5fr 1fr 1fr; gap: var(--space-4); }
+html[data-theme=c] #screen-impact .impact-lower { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: var(--space-4); }
+
+/* 11 Scale — hero-right: payback months (blueprint; verified-input line stays green). */
+html[data-theme=c] #screen-payback .screen-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--space-4); }
+html[data-theme=c] #screen-payback #pb-out { border-radius: var(--radius-hero); }
+html[data-theme=c] #screen-payback .pb-months { font-size: 5.5rem; font-variation-settings: "wdth" var(--wdth-display); }
+html[data-theme=c] #screen-payback .pb-fixed .num { font-variation-settings: "wdth" var(--wdth-display); }
+
+/* Phones (<=760px): one column, hero first, smaller numerals. */
+@media (max-width: 760px) {
+  html[data-theme=c] #screen-plant .screen-body,
+  html[data-theme=c] #screen-detect .screen-body,
+  html[data-theme=c] #screen-health .screen-body,
+  html[data-theme=c] #screen-optimise .screen-body,
+  html[data-theme=c] #screen-brief .screen-body,
+  html[data-theme=c] #screen-act .screen-body,
+  html[data-theme=c] #screen-impact .screen-body,
+  html[data-theme=c] #screen-payback .screen-body,
+  html[data-theme=c] #screen-twin .screen-body,
+  html[data-theme=c] #screen-bill .bill-grid,
+  html[data-theme=c] #screen-heats .heats-top,
+  html[data-theme=c] #screen-heats .heats-sum,
+  html[data-theme=c] #screen-twin .tw-kpis,
+  html[data-theme=c] #screen-impact .impact-cards,
+  html[data-theme=c] #screen-impact .impact-lower,
+  html[data-theme=c] #screen-act #act-cols,
+  html[data-theme=c] #plant-kpis { display: flex; flex-direction: column; }
+  html[data-theme=c] .c-hero { order: -1; }
+  html[data-theme=c] .c-hero .c-num { font-size: 3rem; }
+  html[data-theme=c] #screen-bill .ribbon-sum .num,
+  html[data-theme=c] #screen-optimise .opt-hero .hero-delta,
+  html[data-theme=c] #screen-impact .hero-num,
+  html[data-theme=c] #screen-payback .pb-months,
+  html[data-theme=c] #screen-heats .heats-sum .kpi-card:nth-child(2) .kpi { font-size: 3rem; }
+}
+/* Direction A — Blueprint spine (docs/DESIGN_DIRECTIONS.md §2A).
+ * Every rule here is scoped to html[data-theme=a]: default, theme B and
+ * theme C are untouched. The Plant wiring diagram is the hub; every other
+ * screen head carries a mini-map breadcrumb (JS-injected .a-spine) naming
+ * the plant node it zooms into. Per-screen work is CSS re-styling plus the
+ * breadcrumb with the existing fade — no zoom-animation engine.
+ * Provenance discipline kept: only molten (measured), blueprint
+ * (projected) and green (verified) colour figures; grid, plates and the
+ * mini-map stay graphite/grey; warn keeps its critical role untouched.
+ * Flat surfaces only: the one radial gradient is removed; the grid is 1px
+ * hairlines (linear-gradient used solely to draw the 1px lines). */
+html[data-theme=a] .stage {
+  background-color: var(--color-paper);
+  background-image:
+    linear-gradient(var(--color-rule) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-rule) 1px, transparent 1px);
+  background-size: var(--space-grid) var(--space-grid);
+}
+html[data-theme=a] .twin-stage { background: var(--color-sheet); border: 2px solid var(--color-ink); border-radius: var(--radius-panel); }
+html[data-theme=a] .brand-mark { box-shadow: none; border: 2px solid var(--color-accent-soft); }
+html[data-theme=a] .pl-block { box-shadow: none; border: var(--border-thin) solid var(--color-rule); }
+html[data-theme=a] .pl-block.drag:hover { box-shadow: none; border-color: var(--color-projected); }
+html[data-theme=a] .pl-block.held { box-shadow: none; border-color: var(--color-projected); }
+/* Mini-map breadcrumb: mono node tags; Plant link goes to #plant. */
+html[data-theme=a] .a-spine {
+  margin: 0 0 var(--space-1) 0; font-family: var(--font-mono);
+  font-size: var(--text-micro); color: var(--color-ink-2); white-space: nowrap;
+}
+html[data-theme=a] .a-spine a { color: var(--color-projected); }
+html[data-theme=a] .a-spine [aria-current="page"] { color: var(--color-ink); font-weight: 700; }
+html[data-theme=a] .a-spine .a-sep { color: var(--color-ink-3); }
+/* Tamil/Hindi strings never use the mono face: fall back to body. */
+html[data-theme=a] .a-spine:lang(ta), html[data-theme=a] .a-spine:lang(hi),
+html[data-theme=a] .a-spine [lang="ta"], html[data-theme=a] .a-spine [lang="hi"] { font-family: var(--font-body); }
+/* Mono detail roles (Latin codes/timestamps only, as in theme C). */
+html[data-theme=a] .rule-code { font-family: var(--font-mono); }
+html[data-theme=a] .step-ts { font-family: var(--font-mono); }
+html[data-theme=a] .msg-meta { font-family: var(--font-mono); }
+html[data-theme=a] .health-score { font-family: var(--font-mono); }
+/* Plant is the spine hub: diagram card sits clean on the grid. */
+html[data-theme=a] #plant-tiles { background: var(--color-sheet); }
+html[data-theme=a] .flabel { border-radius: var(--radius-node); }
+/* Detect zooms into the flagged feeder: alert cards dock to their node. */
+html[data-theme=a] .alert-card { border-left: 2px solid var(--color-projected); padding-left: var(--space-3); }
+/* Heats zooms into the furnace node: bench scale as a tapped scale line. */
+html[data-theme=a] .bench-scale { background: var(--color-sheet); border-top: 2px solid var(--color-ink); border-bottom: 2px solid var(--color-ink); }
+/* Bill ribbon as a cable run across the spine; fills keep current colours. */
+html[data-theme=a] .ribbon-wrap { border: 2px solid var(--color-ink); border-radius: var(--radius-panel); }
+html[data-theme=a] .bill-grid .panel { border-left: 2px solid var(--color-projected); padding-left: var(--space-4); }
+/* Plan board as tomorrow's wiring state: blueprint-dash bands, line-label tariff. */
+html[data-theme=a] .pl-bands span { background: var(--color-projected-soft); border-left: 1px dashed var(--color-projected); }
+html[data-theme=a] .tariff-strip .chip { border-style: dashed; }
+/* Brief message as a pinned work-order on the grid; body face untouched. */
+html[data-theme=a] .msg { border: 2px solid var(--color-ink); border-radius: var(--radius-panel); font-family: var(--font-body); }
+/* Act stepper: five nodes on one line (structure kept); done/final states kept. */
+/* Prove hero stamped on the verified branch; Scale hero as end-node tag. */
+html[data-theme=a] .impact-hero { border-left: 4px solid var(--color-verified); }
+html[data-theme=a] #pb-out { border: 2px solid var(--color-projected); border-radius: var(--radius-panel); }
+/* Phones (<=760px): breadcrumb flows above the title; stage unscaled (generic rule below). */
+@media (max-width: 760px) {
+  html[data-theme=a] .a-spine { white-space: normal; }
+}
 /* Phones: no scaled stage; the screens flow and scroll. */
 @media (max-width: 760px) {
   body { overflow: auto; }
@@ -474,6 +702,7 @@ html.static .screen.active { animation: none; }
   .diagram { min-width: 60rem; }
   .flow { overflow-x: auto; }
   .legend, .keys { display: none; }
+  .stage > .theme-switch { position: static; padding: var(--space-2) var(--space-4); }
   .screen { height: auto; padding: var(--space-4); }
   .screen-head { flex-direction: column; align-items: flex-start; }
   .screen-body, #plant-kpis, #plant-tiles, #screen-detect .screen-body, #screen-health .screen-body,

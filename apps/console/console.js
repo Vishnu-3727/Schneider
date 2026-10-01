@@ -10,7 +10,131 @@
   var STATIC = new URLSearchParams(window.location.search).has("static");
   if (STATIC) document.documentElement.classList.add("static");
 
+  /* Theme switch (?theme=a|b|c, anything else = default). Set before any
+   * chart / 3D render so cssVar() resolves the themed tokens. */
+  var THEME = new URLSearchParams(window.location.search).get("theme");
+  if (THEME === "a" || THEME === "b" || THEME === "c") document.documentElement.dataset.theme = THEME;
+  var IS_C = THEME === "c";
+  var IS_A = THEME === "a";
+
+  /* Last plant rows/total from the plant loader (summary.machines). The
+   * theme-C Plant hero reads this instead of scraping tile text, so 3D
+   * floor labels ("3 meters", "CTs", "ok") can never leak into the kW sum. */
+  var PLANT_KW = { total: null, count: 0 };
+
+  /* Direction C heroes (theme c only): one hero tile per screen that has no
+   * single existing hero element (plant, detect, health, act). Every value is
+   * scraped from numbers the screen already rendered; missing → em dash. */
+  function cNum(text) {
+    var m = String(text == null ? "" : text).replace(/,/g, "").match(/-?\d+(\.\d+)?/);
+    return m ? parseFloat(m[0]) : null;
+  }
+  function cDash() { return '<span class="num">\u2014</span>'; }
+  function cHeroUpsert(screen, label, valueHtml, sub, prov) {
+    if (!IS_C) return;
+    var body = document.querySelector("#screen-" + screen + " .screen-body");
+    if (!body) return;
+    var el = body.querySelector(':scope > .c-hero[data-hero="' + screen + '"]');
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "c-hero";
+      el.setAttribute("data-hero", screen);
+      el.setAttribute("role", "status");
+      body.insertBefore(el, body.firstChild);
+    }
+    el.setAttribute("data-prov", prov);
+    el.innerHTML = '<span class="c-label">' + esc(label) + "</span>" +
+      '<span class="c-num">' + valueHtml + "</span>" +
+      (sub ? '<span class="c-sub">' + esc(sub) + "</span>" : "");
+  }
+  function refreshCHero(screen) {
+    if (!IS_C) return;
+    if (screen === "plant") {
+      cHeroUpsert("plant", "Live plant load",
+        PLANT_KW.count ? esc(fmt(PLANT_KW.total, 1)) + " kW" : cDash(),
+        PLANT_KW.count ? PLANT_KW.count + " feeds live" : "no live readings", "measured");
+    } else if (screen === "detect") {
+      var devs = [];
+      Array.prototype.forEach.call(document.querySelectorAll("#detect-alerts-list .alert-dev"), function (n) {
+        var v = cNum(n.textContent);
+        if (v != null) devs.push(v);
+      });
+      var mid = document.querySelector("#detect-alerts-list .alert-machine");
+      cHeroUpsert("detect", "Largest deviation",
+        devs.length ? esc(fmt(Math.max.apply(null, devs), 1)) + "%" : cDash(),
+        mid ? mid.textContent.trim() + " · vs expected" : "vs expected", "measured");
+    } else if (screen === "health") {
+      var scores = [];
+      Array.prototype.forEach.call(document.querySelectorAll("#health-list .health-score"), function (n) {
+        var v = cNum(n.textContent);
+        if (v != null) scores.push(v);
+      });
+      cHeroUpsert("health", "Lowest health score",
+        scores.length ? esc(fmt(Math.min.apply(null, scores), 0)) + " / 100" : cDash(),
+        scores.length ? "lowest of " + scores.length + " machines" : "no scores", "neutral");
+    } else if (screen === "act") {
+      var steps = document.querySelectorAll("#act-stepper .step");
+      var done = document.querySelectorAll("#act-stepper .step.done");
+      if (!steps.length) {
+        cHeroUpsert("act", "Current step", cDash(), "no recommendation yet", "neutral");
+      } else {
+        var last = done.length ? done[done.length - 1] : steps[0];
+        var name = last ? last.childNodes[0].textContent.trim() : "";
+        cHeroUpsert("act", "Current step",
+          "Step " + done.length + " of " + steps.length, name, "neutral");
+      }
+    }
+  }
+
+  /* Theme switcher buttons: reload with ?theme= set, keeping other params. */
+  document.querySelectorAll(".theme-switch button").forEach(function (b) {
+    var t = b.getAttribute("data-theme") || "";
+    b.setAttribute("aria-pressed", String(t === (document.documentElement.dataset.theme || "")));
+    b.addEventListener("click", function () {
+      var u = new URL(window.location.href);
+      if (t) u.searchParams.set("theme", t); else u.searchParams.delete("theme");
+      window.location.href = u.toString();
+    });
+  });
+
   var SCREENS = ["plant", "detect", "heats", "twin", "bill", "health", "optimise", "brief", "act", "impact", "payback"];
+  /* Direction A spine mini-map (theme a only): each screen head names which
+   * plant node the screen zooms into. Plant is the hub; its link goes to
+   * #plant. Rendered once at boot; CSS (html[data-theme=a] .a-spine) owns
+   * the look. Simple fade via the existing .screen.active animation. */
+  var A_SPINE = {
+    plant: null,
+    detect: ["Compressor", "Detect"],
+    heats: ["Furnace", "Heats"],
+    twin: ["Furnace", "Twin"],
+    bill: ["Supply bus", "Bill"],
+    health: ["Fleet", "Health"],
+    optimise: ["Day-ahead wiring", "Plan"],
+    brief: ["Work order", "Brief"],
+    act: ["Action line", "Act"],
+    impact: ["Verified branch", "Prove"],
+    payback: ["End node", "Scale"]
+  };
+  function renderASpine() {
+    if (!IS_A) return;
+    SCREENS.forEach(function (k) {
+      var head = document.querySelector("#screen-" + k + " .screen-head > div:first-child");
+      if (!head || head.querySelector(":scope > .a-spine")) return;
+      var p = document.createElement("p");
+      p.className = "a-spine";
+      p.setAttribute("aria-label", "Mini-map: where this screen sits on the plant");
+      var crumb = A_SPINE[k];
+      if (!crumb) {
+        p.innerHTML = '<span aria-current="page">Plant</span><span class="a-sep" aria-hidden="true"> · </span><span>spine hub</span>';
+      } else {
+        p.innerHTML = '<a href="#plant">Plant</a><span class="a-sep" aria-hidden="true"> &gt; </span>' +
+          "<span>" + esc(crumb[0]) + '</span><span class="a-sep" aria-hidden="true"> &gt; </span>' +
+          '<span aria-current="page">' + esc(crumb[1]) + "</span>";
+      }
+      head.insertBefore(p, head.firstChild);
+    });
+  }
+  renderASpine();
   var STALE_MS = 15 * 60 * 1000;
   var TZ = "Asia/Kolkata";
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -267,9 +391,19 @@
       tiles.innerHTML = '<div class="tile">' + naHtml() + "<p class='note'>" +
         esc((machines && machines.error) || (summary && summary.error) || "") + "</p></div>";
       setChips("chips-plant", ["data unavailable", "updated " + fmtT(nowIso())]);
+      PLANT_KW = { total: null, count: 0 };
       return;
     }
     var rows = summary.machines || [];
+    /* Theme-C hero source: sum of latest_power_kw over rows with a reading.
+     * Never scraped from tile/floor-label text. */
+    PLANT_KW = (function (rs) {
+      var t = 0, n = 0;
+      rs.forEach(function (m) {
+        if (m.latest_power_kw != null && isFinite(m.latest_power_kw)) { t += m.latest_power_kw; n++; }
+      });
+      return { total: n ? t : null, count: n };
+    })(rows);
     var totE = rows.reduce(function (a, m) { return a + (m.energy_kwh || 0); }, 0);
     var totP = rows.reduce(function (a, m) { return a + (m.production_good_kg || 0); }, 0);
     var fleetSec = totP > 0 ? totE / totP * 1000 : null;
@@ -736,8 +870,9 @@
     scene.add(new THREE.HemisphereLight(0xf2f3ef, 0x3a4150, 0.9));
     var sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(4, 8, 5); scene.add(sun);
     var steel = new THREE.MeshStandardMaterial({ color: 0x4b5563, metalness: 0.6, roughness: 0.45 });
-    /* platform and tilt frame */
-    var base = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.3, 3.2), new THREE.MeshStandardMaterial({ color: 0x9aa1a9, roughness: 0.9 }));
+    /* platform and tilt frame (theme b: dark control-room palette) */
+    var darkB = document.documentElement.dataset.theme === "b";
+    var base = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.3, 3.2), new THREE.MeshStandardMaterial({ color: darkB ? 0x232b38 : 0x9aa1a9, roughness: 0.9 }));
     base.position.y = 0.15; scene.add(base);
     [-1.25, 1.25].forEach(function (x) {
       var post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.6, 0.35), steel); post.position.set(x, 1.0, 0); scene.add(post);
@@ -747,9 +882,9 @@
       new THREE.MeshStandardMaterial({ color: 0x6b7280, metalness: 0.3, roughness: 0.6, side: THREE.DoubleSide }));
     shell.position.y = 1.2; scene.add(shell);
     var lining = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.7, 1.55, 48, 1, true),
-      new THREE.MeshStandardMaterial({ color: 0xd6d0c4, roughness: 1, side: THREE.BackSide }));
+      new THREE.MeshStandardMaterial({ color: darkB ? 0x39404d : 0xd6d0c4, roughness: 1, side: THREE.BackSide }));
     lining.position.y = 1.22; scene.add(lining);
-    var floor = new THREE.Mesh(new THREE.CircleGeometry(0.7, 48), new THREE.MeshStandardMaterial({ color: 0xcfc8ba }));
+    var floor = new THREE.Mesh(new THREE.CircleGeometry(0.7, 48), new THREE.MeshStandardMaterial({ color: darkB ? 0x2b3342 : 0xcfc8ba }));
     floor.rotation.x = -Math.PI / 2; floor.position.y = 0.45; scene.add(floor);
     var rim = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.12, 12, 64), steel); rim.rotation.x = Math.PI / 2; rim.position.y = 2.0; scene.add(rim);
     /* copper induction coil: helix around the shell */
@@ -1735,9 +1870,11 @@
     controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.46;
     scene.add(new THREE.HemisphereLight(0xf5f5f0, 0x4a5160, 0.95));
     var sun = new THREE.DirectionalLight(0xffffff, 0.6); sun.position.set(6, 12, 8); scene.add(sun);
-    var floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(22, 12), new THREE.MeshStandardMaterial({ color: 0xe4e5df, roughness: 1 }));
+    /* theme b: dark control-room floor and grid so the lit machines read */
+    var darkB = document.documentElement.dataset.theme === "b";
+    var floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(22, 12), new THREE.MeshStandardMaterial({ color: darkB ? 0x161d29 : 0xe4e5df, roughness: 1 }));
     floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.y = 0; scene.add(floorMesh);
-    var grid = new THREE.GridHelper(22, 22, 0xc9ccc4, 0xd6d8d2); grid.scale.z = 12 / 22; grid.position.y = 0.01; scene.add(grid);
+    var grid = new THREE.GridHelper(22, 22, darkB ? 0x334052 : 0xc9ccc4, darkB ? 0x232c3d : 0xd6d8d2); grid.scale.z = 12 / 22; grid.position.y = 0.01; scene.add(grid);
     var mat = function (c, o) { return new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.55, metalness: 0.3 }, o || {})); };
     var alertM = {}; anoms.forEach(function (a) { alertM[a.machine_id] = true; });
     var byId = {}; rows.forEach(function (m) { byId[m.machine_id] = m; });
@@ -1758,7 +1895,7 @@
     var motor = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.1, 24), mat(0x3b4b8a)); motor.rotation.z = Math.PI / 2; motor.position.set(-0.4, 0.5, 0); pz.add(motor);
     var volute = new THREE.Mesh(new THREE.SphereGeometry(0.45, 20, 16), mat(0x7a828c)); volute.position.set(0.55, 0.5, 0); pz.add(volute);
     /* meter panel, gateway, server */
-    var panel = group(-1, -3.8), pnl = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2, 0.5), mat(0xdfe2dc)); pnl.position.y = 1; panel.add(pnl);
+    var panel = group(-1, -3.8), pnl = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2, 0.5), mat(darkB ? 0x2a3340 : 0xdfe2dc)); pnl.position.y = 1; panel.add(pnl);
     var gw = group(3.2, -3.8), gwm = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.5), mat(0x2f5bd3)); gwm.position.y = 1.2; gw.add(gwm);
     var srv = group(6.2, -3.8), srvm = new THREE.Mesh(new THREE.BoxGeometry(1, 2.2, 0.9), mat(0x1b2430)); srvm.position.y = 1.1; srv.add(srvm);
     var parts = [["furnace-01", fz, fBody], ["compressor-01", cz, skid], ["pump-01", pz, motor]];
@@ -1778,7 +1915,7 @@
       var curve = new THREE.CatmullRomCurve3([a, new THREE.Vector3(a.x, 0.15, mid.z), new THREE.Vector3(b.x, 0.15, mid.z), b]);
       var kw = m.latest_power_kw || 0, maxKw = Math.max.apply(null, rows.map(function (r) { return r.latest_power_kw || 0; }).concat([1]));
       var cab = new THREE.Mesh(new THREE.TubeGeometry(curve, 60, 0.05 + 0.1 * kw / maxKw, 8, false),
-        mat(alertM[p[0]] ? 0xe8541c : 0x1b2430, { emissive: alertM[p[0]] ? 0xe8541c : 0x000000, emissiveIntensity: 0.4 }));
+        mat(alertM[p[0]] ? 0xe8541c : (darkB ? 0xb9c2d4 : 0x1b2430), { emissive: alertM[p[0]] ? 0xe8541c : 0x000000, emissiveIntensity: 0.4 }));
       scene.add(cab);
       var dots = [];
       for (var k = 0; k < 4; k++) { var d = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), mat(0xfff1c2, { emissive: 0xffc861, emissiveIntensity: 1 })); scene.add(d); dots.push(d); }
@@ -1933,6 +2070,7 @@
     /* ?trail=<key> opens a number's trail once the screen has loaded
      * (used to capture the provenance panel for the deck). */
     Promise.resolve(loaders[s]()).then(function () {
+      refreshCHero(s);
       var t = new URLSearchParams(window.location.search).get("trail");
       if (t) openTrail(t);
     });
