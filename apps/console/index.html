@@ -6,7 +6,7 @@
 <title>JouleMitra Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Noto+Sans+Tamil:wght@400;600&family=Noto+Sans+Devanagari:wght@400;600&display=block" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600..900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+Tamil:wght@400;600&family=Noto+Sans+Devanagari:wght@400;600&display=block" rel="stylesheet">
 <link rel="stylesheet" href="/console/tokens.css">
 <link rel="stylesheet" href="/console/console.css">
 <script src="/console-vendor/plotly.min.js"></script>
@@ -23,6 +23,7 @@
       <span class="phase"><span class="phase-label">See</span><a class="nav-step" href="#plant" data-screen="plant"><b>1</b>Plant</a><a class="nav-step" href="#detect" data-screen="detect"><b>2</b>Detect</a><a class="nav-step" href="#heats" data-screen="heats"><b>3</b>Heats</a><a class="nav-step" href="#twin" data-screen="twin"><b>4</b>Twin</a><a class="nav-step" href="#bill" data-screen="bill"><b>5</b>Bill</a><a class="nav-step" href="#health" data-screen="health"><b>6</b>Health</a></span><span class="phase"><span class="phase-label">Decide</span><a class="nav-step" href="#optimise" data-screen="optimise"><b>7</b>Plan</a><a class="nav-step" href="#brief" data-screen="brief"><b>8</b>Brief</a><a class="nav-step" href="#act" data-screen="act"><b>9</b>Act</a></span><span class="phase"><span class="phase-label">Prove</span><a class="nav-step" href="#impact" data-screen="impact"><b>10</b>Prove</a><a class="nav-step" href="#payback" data-screen="payback"><b>11</b>Scale</a></span>
     </nav>
     <button type="button" class="btn sm fault-btn" id="fault-open">Try a fault</button>
+    <button type="button" class="btn sm" id="tour-start">Play story</button>
     <p class="legend" aria-label="Colour key">
       <span class="k measured">measured</span><span class="k projected">projected</span><span class="k verified">verified</span>
     </p>
@@ -177,7 +178,6 @@
     <div id="fault-log" aria-live="polite"></div>
   </aside>
   <aside class="trail" id="trail" aria-label="Where this number comes from" aria-live="polite"></aside>
-  <div class="theme-switch" role="group" aria-label="Theme">Look: <button type="button" data-theme="">Default</button><button type="button" data-theme="a">A</button><button type="button" data-theme="b">B</button><button type="button" data-theme="c">C</button></div>
   <p class="keys" aria-hidden="true">← → to move between screens · click an underlined number to see where it comes from</p>
 </div>
 </div>

@@ -1,31 +1,31 @@
 /* JouleMitra Console — design tokens (single source of truth).
- * Colour encodes provenance: molten = measured energy / waste,
- * blueprint = projected plan, green = verified saving. Nothing else is coloured. */
+ * One bold dark look. Colour encodes provenance: molten = measured
+ * energy / waste, blueprint = projected plan, green = verified saving.
+ * Nothing else is coloured. Flat surfaces only: no gradients, glows,
+ * shadow stacks or glassmorphism. */
 :root {
-  --color-surround: oklch(86% 0.006 120);   /* letterbox around the stage */
-  --color-paper: oklch(96% 0.005 110);      /* chalk */
-  --color-sheet: oklch(99.4% 0.002 110);    /* the one raised sheet per screen */
-  --color-ink: oklch(24% 0.025 255);        /* graphite */
-  --color-ink-2: oklch(45% 0.02 250);       /* steel */
-  --color-ink-3: oklch(50% 0.015 250);       /* quiet labels; ~50 % L keeps small text >= 4.5:1 on paper/sheet */
-  --color-rule: oklch(87% 0.008 110);
-  --color-accent: oklch(64% 0.19 42);       /* molten: measured energy, waste */
-  --color-accent-soft: oklch(93% 0.045 55);
-  --color-accent-ink: oklch(45% 0.15 42);   /* dark orange text on soft orange */
-  --color-projected: oklch(52% 0.17 265);   /* blueprint: projected plans */
-  --color-projected-soft: oklch(93% 0.035 265);
-  --color-verified: oklch(50% 0.11 160);    /* verified savings only */
-  --color-verified-soft: oklch(93% 0.04 160);
-  --color-warn: oklch(52% 0.19 27);         /* critical */
-  --color-warn-soft: oklch(93% 0.04 27);
+  --color-surround: oklch(11% 0.01 255);   /* letterbox around the stage */
+  --color-paper: oklch(16% 0.012 255);      /* dark canvas */
+  --color-sheet: oklch(21% 0.014 255);      /* hero + raised panels, flat */
+  --color-ink: oklch(95% 0.008 90);         /* primary text */
+  --color-ink-2: oklch(76% 0.012 255);      /* secondary */
+  --color-ink-3: oklch(64% 0.012 255);      /* quiet labels */
+  --color-rule: oklch(32% 0.015 255);       /* hairline borders */
+  --color-accent: oklch(72% 0.19 45);       /* molten: measured energy, waste */
+  --color-accent-soft: oklch(30% 0.07 45);
+  --color-accent-ink: oklch(84% 0.12 55);   /* molten text on dark soft wash */
+  --color-projected: oklch(74% 0.13 255);   /* blueprint: projected plans */
+  --color-projected-soft: oklch(28% 0.06 255);
+  --color-verified: oklch(76% 0.15 160);    /* verified savings only */
+  --color-verified-soft: oklch(28% 0.06 160);
+  --color-warn: oklch(68% 0.2 25);           /* critical */
+  --color-warn-soft: oklch(28% 0.07 25);
 
-  --font-display: "Archivo", "Segoe UI", system-ui, sans-serif;
-  --font-body: "Archivo", "Noto Sans Tamil", "Noto Sans Devanagari", "Segoe UI", system-ui, sans-serif;
-  --font-numerals: "Archivo", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "Archivo", "Segoe UI", system-ui, sans-serif;
-  --font-sans: "Archivo", "Segoe UI", system-ui, sans-serif;
-  --wdth-display: 112;   /* expanded for titles and key numbers */
-  --wdth-label: 88;      /* slightly condensed for small labels */
+  --font-display: "Big Shoulders Display", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Noto Sans Tamil", "Noto Sans Devanagari", system-ui, sans-serif;
+  --font-numerals: "Big Shoulders Display", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-sans: "IBM Plex Sans", "Noto Sans Tamil", "Noto Sans Devanagari", system-ui, sans-serif;
 
   /* The stage is a fixed 1600x900 (16:9) canvas scaled to fit the window,
    * so the browser and the PPT slide show the same composition. */
@@ -33,11 +33,11 @@
   --stage-h: 900px;
   --root-size: 16px;
 
-  --text-hero: 8.5rem;
+  --text-hero: 7rem;
   --text-hero-s: 5rem;
-  --text-kpi: 2.75rem;
+  --text-kpi: 3rem;
   --text-kpi-s: 2.25rem;
-  --text-title: 2.5rem;
+  --text-title: 2.75rem;
   --text-lead: 1.3rem;
   --text-body: 1rem;
   --text-label: 0.8125rem;
@@ -56,8 +56,9 @@
   --space-11: 2.75rem;
   --space-12: 3rem;
 
-  --radius-sheet: 0.375rem;
-  --radius-panel: 0.375rem;
+  --radius-sheet: 0.5rem;
+  --radius-panel: 0.5rem;
+  --radius-hero: 0.5rem;   /* hero tile; supporting tiles share it */
   --radius-pill: 999px;
   --border-thin: 1px;
   --ring-width: 2px;
@@ -67,69 +68,10 @@
 
   --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
   --anim-fade: fade 180ms var(--ease-out);
-}
-
-/* Direction B — Dark control room (docs/DESIGN_DIRECTIONS.md §2B).
- * Grey-on-dark carries normal state; only molten (measured),
- * blueprint-light (projected) and green-light (verified) saturate.
- * Warn red keeps its critical-state role, re-tuned for dark.
- * --color-rule is a mid slate hairline; --color-accent-ink is a light
- * orange so text on the dark accent-soft wash stays readable. */
-:root[data-theme="b"] {
-  --color-surround: oklch(14% 0.01 260);    /* letterbox, near-black */
-  --color-paper: oklch(20% 0.012 260);      /* dark slate paper */
-  --color-sheet: oklch(25% 0.014 260);      /* raised sheet, flat */
-  --color-ink: oklch(92% 0.01 260);         /* primary text, grey-on-dark */
-  --color-ink-2: oklch(72% 0.012 260);      /* secondary */
-  --color-ink-3: oklch(62% 0.012 260);      /* quiet */
-  --color-rule: oklch(38% 0.016 260);
-  --color-accent: oklch(74% 0.17 48);       /* molten, lifted for dark */
-  --color-accent-soft: oklch(32% 0.06 45);
-  --color-accent-ink: oklch(82% 0.13 52);   /* light orange text on the dark soft wash */
-  --color-projected: oklch(76% 0.13 265);   /* blueprint, lightened */
-  --color-projected-soft: oklch(30% 0.05 265);
-  --color-verified: oklch(74% 0.13 165);    /* verified green, lightened */
-  --color-verified-soft: oklch(30% 0.05 165);
-  --color-warn: oklch(70% 0.17 25);         /* critical, re-tuned for dark */
-  --color-warn-soft: oklch(30% 0.06 25);
-}
-
-/* Direction C — Stat-led bento (docs/DESIGN_DIRECTIONS.md §2C).
- * Cool light paper; hero tile pops one step above supporting tiles.
- * Display face stays Archivo (Expanded width axis for hero numerals),
- * so Tamil/Devanagari shaping through --font-body is untouched. */
-:root[data-theme=c] {
-  --color-paper: oklch(95% 0.01 230);      /* cool paper canvas */
-  --color-sheet: oklch(99.5% 0.004 230);  /* hero tile, one step up */
-  --color-ink: oklch(22% 0.03 260);       /* slightly inkier display */
-  --color-accent: oklch(62% 0.19 42);     /* molten: measured heroes */
-  --color-accent-soft: oklch(93% 0.045 55);
-  --color-accent-ink: oklch(45% 0.15 42);
-  --color-projected: oklch(50% 0.18 265); /* blueprint, slightly deepened */
-  --color-projected-soft: oklch(93% 0.035 265);
-  --font-mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
-  --wdth-display: 125;   /* Archivo Expanded hero numerals */
-  --wdth-label: 88;
-  --radius-hero: 0.75rem; /* hero tile; supporting tiles keep 0.375rem */
-}
-
-/* Direction A — Blueprint spine (docs/DESIGN_DIRECTIONS.md §2A).
- * Warm light sheet so grid hairlines read; graphite-blue ink titles;
- * molten a touch deeper, wiring-blue lines. Verified green untouched.
- * Mono is Latin-only detail (node tags / rule IDs); Tamil/Devanagari
- * strings stay on --font-body (see console.css fallback). */
-:root[data-theme=a] {
-  --color-paper: oklch(97.5% 0.008 100);   /* warm sheet */
-  --color-sheet: oklch(99.6% 0.002 100);   /* zoom cards sit clean on the grid */
-  --color-ink: oklch(26% 0.03 260);        /* graphite-blue */
-  --color-accent: oklch(60% 0.185 42);     /* molten, a touch deeper */
-  --color-accent-soft: oklch(93% 0.045 55);
-  --color-accent-ink: oklch(45% 0.15 42);
-  --color-projected: oklch(54% 0.16 262);  /* wiring-blue lines + zoom links */
-  --color-projected-soft: oklch(93% 0.035 265);
-  --font-mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
-  --space-grid: 2rem;       /* diagram + card snap rhythm */
-  --radius-sheet: 0.25rem;  /* more drafted, less soft */
-  --radius-panel: 0.25rem;
-  --radius-node: 0.25rem;   /* node tags */
+  /* Motion durations: screen fade 200ms, screen enter 260ms,
+   * chart intro 280ms, hero count-up 600ms. */
+  --dur-quick: 200ms;
+  --dur-screen: 260ms;
+  --dur-chart: 280ms;
+  --dur-count: 600ms;
 }

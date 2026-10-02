@@ -10,19 +10,14 @@
   var STATIC = new URLSearchParams(window.location.search).has("static");
   if (STATIC) document.documentElement.classList.add("static");
 
-  /* Theme switch (?theme=a|b|c, anything else = default). Set before any
-   * chart / 3D render so cssVar() resolves the themed tokens. */
-  var THEME = new URLSearchParams(window.location.search).get("theme");
-  if (THEME === "a" || THEME === "b" || THEME === "c") document.documentElement.dataset.theme = THEME;
-  var IS_C = THEME === "c";
-  var IS_A = THEME === "a";
+  /* Single bold dark look: no theme param. ?theme= is ignored. */
 
   /* Last plant rows/total from the plant loader (summary.machines). The
    * theme-C Plant hero reads this instead of scraping tile text, so 3D
    * floor labels ("3 meters", "CTs", "ok") can never leak into the kW sum. */
   var PLANT_KW = { total: null, count: 0 };
 
-  /* Direction C heroes (theme c only): one hero tile per screen that has no
+  /* Hero tiles (all screens): one hero tile per screen that has no
    * single existing hero element (plant, detect, health, act). Every value is
    * scraped from numbers the screen already rendered; missing → em dash. */
   function cNum(text) {
@@ -31,7 +26,6 @@
   }
   function cDash() { return '<span class="num">\u2014</span>'; }
   function cHeroUpsert(screen, label, valueHtml, sub, prov) {
-    if (!IS_C) return;
     var body = document.querySelector("#screen-" + screen + " .screen-body");
     if (!body) return;
     var el = body.querySelector(':scope > .c-hero[data-hero="' + screen + '"]');
@@ -48,7 +42,6 @@
       (sub ? '<span class="c-sub">' + esc(sub) + "</span>" : "");
   }
   function refreshCHero(screen) {
-    if (!IS_C) return;
     if (screen === "plant") {
       cHeroUpsert("plant", "Live plant load",
         PLANT_KW.count ? esc(fmt(PLANT_KW.total, 1)) + " kW" : cDash(),
@@ -60,9 +53,22 @@
         if (v != null) devs.push(v);
       });
       var mid = document.querySelector("#detect-alerts-list .alert-machine");
+      var sumEl = document.getElementById("detect-sum");
+      var sumHtml = sumEl ? sumEl.innerHTML : "";
       cHeroUpsert("detect", "Largest deviation",
         devs.length ? esc(fmt(Math.max.apply(null, devs), 1)) + "%" : cDash(),
-        mid ? mid.textContent.trim() + " · vs expected" : "vs expected", "measured");
+        "", "measured");
+      /* The lead sentence sits beside the hero number in the band instead of
+       * under the chart: copy it into the hero and hide the original so it
+       * is not shown twice. */
+      var dHero = document.querySelector('#screen-detect .c-hero[data-hero="detect"]');
+      if (dHero) {
+        var dNum = dHero.querySelector(".c-num");
+        dHero.innerHTML = '<span class="c-main"><span class="c-label">Largest deviation</span>' +
+          (dNum ? dNum.outerHTML : "") + "</span>" +
+          '<span class="c-side">' + (sumHtml || (mid ? esc(mid.textContent.trim()) + " · vs expected" : "vs expected")) + "</span>";
+      }
+      if (sumEl) sumEl.style.display = "none";
     } else if (screen === "health") {
       var scores = [];
       Array.prototype.forEach.call(document.querySelectorAll("#health-list .health-score"), function (n) {
@@ -70,7 +76,7 @@
         if (v != null) scores.push(v);
       });
       cHeroUpsert("health", "Lowest health score",
-        scores.length ? esc(fmt(Math.min.apply(null, scores), 0)) + " / 100" : cDash(),
+        scores.length ? esc(fmt(Math.min.apply(null, scores), 1)) + " / 100" : cDash(),
         scores.length ? "lowest of " + scores.length + " machines" : "no scores", "neutral");
     } else if (screen === "act") {
       var steps = document.querySelectorAll("#act-stepper .step");
@@ -86,55 +92,7 @@
     }
   }
 
-  /* Theme switcher buttons: reload with ?theme= set, keeping other params. */
-  document.querySelectorAll(".theme-switch button").forEach(function (b) {
-    var t = b.getAttribute("data-theme") || "";
-    b.setAttribute("aria-pressed", String(t === (document.documentElement.dataset.theme || "")));
-    b.addEventListener("click", function () {
-      var u = new URL(window.location.href);
-      if (t) u.searchParams.set("theme", t); else u.searchParams.delete("theme");
-      window.location.href = u.toString();
-    });
-  });
-
   var SCREENS = ["plant", "detect", "heats", "twin", "bill", "health", "optimise", "brief", "act", "impact", "payback"];
-  /* Direction A spine mini-map (theme a only): each screen head names which
-   * plant node the screen zooms into. Plant is the hub; its link goes to
-   * #plant. Rendered once at boot; CSS (html[data-theme=a] .a-spine) owns
-   * the look. Simple fade via the existing .screen.active animation. */
-  var A_SPINE = {
-    plant: null,
-    detect: ["Compressor", "Detect"],
-    heats: ["Furnace", "Heats"],
-    twin: ["Furnace", "Twin"],
-    bill: ["Supply bus", "Bill"],
-    health: ["Fleet", "Health"],
-    optimise: ["Day-ahead wiring", "Plan"],
-    brief: ["Work order", "Brief"],
-    act: ["Action line", "Act"],
-    impact: ["Verified branch", "Prove"],
-    payback: ["End node", "Scale"]
-  };
-  function renderASpine() {
-    if (!IS_A) return;
-    SCREENS.forEach(function (k) {
-      var head = document.querySelector("#screen-" + k + " .screen-head > div:first-child");
-      if (!head || head.querySelector(":scope > .a-spine")) return;
-      var p = document.createElement("p");
-      p.className = "a-spine";
-      p.setAttribute("aria-label", "Mini-map: where this screen sits on the plant");
-      var crumb = A_SPINE[k];
-      if (!crumb) {
-        p.innerHTML = '<span aria-current="page">Plant</span><span class="a-sep" aria-hidden="true"> · </span><span>spine hub</span>';
-      } else {
-        p.innerHTML = '<a href="#plant">Plant</a><span class="a-sep" aria-hidden="true"> &gt; </span>' +
-          "<span>" + esc(crumb[0]) + '</span><span class="a-sep" aria-hidden="true"> &gt; </span>' +
-          '<span aria-current="page">' + esc(crumb[1]) + "</span>";
-      }
-      head.insertBefore(p, head.firstChild);
-    });
-  }
-  renderASpine();
   var STALE_MS = 15 * 60 * 1000;
   var TZ = "Asia/Kolkata";
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -325,7 +283,7 @@
       autosize: true,
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "rgba(0,0,0,0)",
-      font: { family: "Archivo, 'Segoe UI', system-ui, sans-serif", color: c.ink2, size: rem(0.875) },
+      font: { family: "'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif", color: c.ink2, size: rem(0.875) },
       margin: { l: rem(3.5), r: rem(1), t: rem(0.75), b: rem(2.75) },
       xaxis: { gridcolor: c.rule, zerolinecolor: c.rule, tickfont: { color: c.ink2 } },
       yaxis: { gridcolor: c.rule, zerolinecolor: c.rule, tickfont: { color: c.ink2 } },
@@ -350,6 +308,9 @@
       window.Plotly.newPlot(node, data, layout, {
         displayModeBar: false, responsive: true, staticPlot: STATIC
       });
+      /* Charts animate in on first draw per visit (opacity on the chart
+       * container; skipped under reduced-motion / ?static=1). */
+      chartIntro(node);
       /* G1: re-fit after layout so the chart owns the full panel height. */
       try {
         if (window.Plotly.Plots && window.Plotly.Plots.resize) window.Plotly.Plots.resize(node);
@@ -376,6 +337,79 @@
     return s;
   }
 
+  /* ---------- motion (transform/opacity only) ----------
+   * Screen fades, hero count-ups and chart intros all run on transform /
+   * opacity and are skipped under prefers-reduced-motion or ?static=1, in
+   * which case the final values are already in the DOM. */
+  var EASE_OUT = "cubic-bezier(0.2, 0.7, 0.2, 1)";
+  function reducedMotion() {
+    return STATIC ||
+      (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+  function chartIntro(el) {
+    if (reducedMotion() || !el || !el.animate) return;
+    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 280, easing: EASE_OUT });
+  }
+  /* Count one text node from 0 to each number it holds (~600 ms, ease-out),
+   * preserving the exact final text (units, sign, decimals, separators). */
+  function countUpNode(node) {
+    var orig = node.nodeValue;
+    if (!orig || !/\d/.test(orig)) return;
+    var re = /[+\-−]?\d[\d,]*(?:\.\d+)?/g;
+    var tokens = [], last = 0, m;
+    while ((m = re.exec(orig)) !== null) {
+      if (m.index > last) tokens.push({ t: orig.slice(last, m.index) });
+      var tok = m[0], sign = "";
+      if (tok[0] === "+" || tok[0] === "-" || tok[0] === "−") { sign = tok[0]; tok = tok.slice(1); }
+      var target = parseFloat(tok.replace(/,/g, ""));
+      if (!isFinite(target)) {
+        tokens.push({ t: m[0] });
+      } else {
+        var dec = /\.\d+/.exec(tok);
+        tokens.push({ n: true, sign: sign, target: target, nd: dec ? dec[0].length - 1 : 0 });
+      }
+      last = m.index + m[0].length;
+    }
+    if (last < orig.length) tokens.push({ t: orig.slice(last) });
+    if (!tokens.some(function (x) { return x.n; })) return;
+    function fr(n, nd) {
+      return Number(n).toLocaleString("en-IN", { minimumFractionDigits: nd, maximumFractionDigits: nd });
+    }
+    var t0 = null;
+    function step(t) {
+      if (t0 == null) t0 = t;
+      var k = Math.min(1, (t - t0) / 600);
+      var e = 1 - Math.pow(1 - k, 3);
+      node.nodeValue = tokens.map(function (x) {
+        if (!x.n) return x.t;
+        var v = x.target * e, s = fr(v, x.nd);
+        if (x.sign === "+") return (v > 0 ? "+" : "") + s;
+        if ((x.sign === "-" || x.sign === "−") && (v < 0 || (v === 0 && k > 0))) {
+          return (x.sign === "−" ? "−" : "-") + s.replace(/^-/, "");
+        }
+        if (x.target < 0 && v < 0) return "−" + s.replace(/^-/, "");
+        return s;
+      }).join("");
+      if (k < 1) requestAnimationFrame(step);
+      else node.nodeValue = orig;
+    }
+    requestAnimationFrame(step);
+  }
+  /* Hero / KPI numbers count up once per screen visit. Only the big
+   * hero/KPI figures; inline numbers and table cells never animate. */
+  function animateHeroNumbers(root) {
+    if (reducedMotion() || !root) return;
+    var els = root.querySelectorAll(
+      ".c-hero .c-num, .hero-num, .pb-months, .opt-hero .hero-delta, " +
+      ".kpi, .ribbon-sum .num, .hero-kv .num");
+    Array.prototype.forEach.call(els, function (el) {
+      var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+      var nodes = [], n;
+      while ((n = walker.nextNode())) nodes.push(n);
+      nodes.forEach(countUpNode);
+    });
+  }
+
   /* ================= 1. PLANT ================= */
   var plantSeq = 0;
   async function loadPlant() {
@@ -395,7 +429,7 @@
       return;
     }
     var rows = summary.machines || [];
-    /* Theme-C hero source: sum of latest_power_kw over rows with a reading.
+    /* Plant hero source: sum of latest_power_kw over rows with a reading.
      * Never scraped from tile/floor-label text. */
     PLANT_KW = (function (rs) {
       var t = 0, n = 0;
@@ -870,9 +904,8 @@
     scene.add(new THREE.HemisphereLight(0xf2f3ef, 0x3a4150, 0.9));
     var sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(4, 8, 5); scene.add(sun);
     var steel = new THREE.MeshStandardMaterial({ color: 0x4b5563, metalness: 0.6, roughness: 0.45 });
-    /* platform and tilt frame (theme b: dark control-room palette) */
-    var darkB = document.documentElement.dataset.theme === "b";
-    var base = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.3, 3.2), new THREE.MeshStandardMaterial({ color: darkB ? 0x232b38 : 0x9aa1a9, roughness: 0.9 }));
+    /* platform and tilt frame (dark control-room palette) */
+    var base = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.3, 3.2), new THREE.MeshStandardMaterial({ color: 0x232b38, roughness: 0.9 }));
     base.position.y = 0.15; scene.add(base);
     [-1.25, 1.25].forEach(function (x) {
       var post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.6, 0.35), steel); post.position.set(x, 1.0, 0); scene.add(post);
@@ -882,9 +915,9 @@
       new THREE.MeshStandardMaterial({ color: 0x6b7280, metalness: 0.3, roughness: 0.6, side: THREE.DoubleSide }));
     shell.position.y = 1.2; scene.add(shell);
     var lining = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.7, 1.55, 48, 1, true),
-      new THREE.MeshStandardMaterial({ color: darkB ? 0x39404d : 0xd6d0c4, roughness: 1, side: THREE.BackSide }));
+      new THREE.MeshStandardMaterial({ color: 0x39404d, roughness: 1, side: THREE.BackSide }));
     lining.position.y = 1.22; scene.add(lining);
-    var floor = new THREE.Mesh(new THREE.CircleGeometry(0.7, 48), new THREE.MeshStandardMaterial({ color: darkB ? 0x2b3342 : 0xcfc8ba }));
+    var floor = new THREE.Mesh(new THREE.CircleGeometry(0.7, 48), new THREE.MeshStandardMaterial({ color: 0x2b3342 }));
     floor.rotation.x = -Math.PI / 2; floor.position.y = 0.45; scene.add(floor);
     var rim = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.12, 12, 64), steel); rim.rotation.x = Math.PI / 2; rim.position.y = 2.0; scene.add(rim);
     /* copper induction coil: helix around the shell */
@@ -1225,6 +1258,21 @@
         esc(String(v.n_post || "—")) + " measured hours</span></div>" +
         '<div class="hero-kv"><span class="num">± ' + esc(fmt(v.uncertainty_kwh, 1)) + ' kWh</span><span>error band at ' +
         esc(conf) + (ratio ? " — the saving is " + esc(fmt(ratio, 1)) + "× larger" : "") + "</span></div></div>";
+      /* ADEETIE: BEE ADEETIE operational guidelines, PIB 15 Jul 2025 —
+       * foundry is a notified sector; interest subvention is released only
+       * after post-implementation M&V shows >= 10 % energy saving. */
+      (function () {
+        var sp = v.saving_pct, line;
+        if (sp == null || !isFinite(sp)) {
+          line = "ADEETIE releases its interest subvention only after M&amp;V shows at least 10 % saving. No verified saving figure to check yet.";
+        } else if (sp >= 10) {
+          line = "ADEETIE releases its interest subvention only after M&amp;V shows at least 10 % saving. This change: " + esc(fmt(sp, 1)) + " % — meets the 10 % M&amp;V threshold.";
+        } else {
+          line = "ADEETIE releases its interest subvention only after M&amp;V shows at least 10 % saving. This change: " + esc(fmt(sp, 1)) + " % — not yet; about " + esc(fmt(10 - sp, 1)) + " % more, verified, reaches it.";
+        }
+        var left = hero.querySelector(".hero-left");
+        if (left) left.innerHTML += '<p class="note">' + line + " " + badge("scheme rule") + "</p>";
+      })();
 
       var cost = v.cost_impact || {}, co2 = v.co2_impact || {};
       cards.innerHTML =
@@ -1374,7 +1422,7 @@
     if (!v) { box.innerHTML = naHtml("no verified saving yet — run the demo first"); document.getElementById("pb-out").innerHTML = ""; return; }
     var kwhDay = v.counterfactual_kwh / v.n_post * 24;
     var factor = ((v.co2_impact || {}).factor || {}).value;
-    if (!PB) PB = { hw: 60000, sub: 1500, rate: avgRate ? Math.round(avgRate * 100) / 100 : 7.5, days: 300, kwhDay: Math.round(kwhDay), furnaces: 1, share: 30, years: 3 };
+    if (!PB) PB = { hw: 60000, sub: 1500, rate: avgRate ? Math.round(avgRate * 100) / 100 : 7.5, days: 300, kwhDay: Math.round(kwhDay), furnaces: 1, share: 30, years: 3, loan: 2500000, bank: 10, size: 0 };
     var fields = [
       ["hw", "Hardware + install per site", "₹", 10000, 300000, 5000, "example input: meter, converter, gateway, fitting. Replace with a real quote."],
       ["sub", "JouleMitra subscription", "₹ / month", 0, 10000, 250, "example input"],
@@ -1383,7 +1431,10 @@
       ["days", "Operating days per year", "days", 150, 365, 5, "example input"],
       ["furnaces", "Furnaces per site", "", 1, 6, 1, "example input"],
       ["share", "Pay-from-savings: share to JouleMitra", "%", 0, 60, 5, "example input: the SME pays nothing upfront, only a share of verified savings"],
-      ["years", "Pay-from-savings: contract length", "years", 1, 5, 1, "example input"]
+      ["years", "Pay-from-savings: contract length", "years", 1, 5, 1, "example input"],
+      ["loan", "ADEETIE loan amount", "₹", 1000000, 15000000, 100000, "example input: a furnace retrofit loan; the JouleMitra kit alone is below the ₹10 lakh minimum"],
+      ["bank", "Bank lending rate", "%", 8, 14, 0.25, "example input"],
+      ["size", "Enterprise size for ADEETIE", "", 0, 1, 1, "example input: micro/small gets 5 % subvention, medium gets 3 %"]
     ];
     box.innerHTML = '<div class="pb-fixed"><span class="num">' + esc(fmt(v.saving_pct, 1)) + ' %</span> less energy per tonne ' +
       badge("VERIFIED", "verified") + '<p class="note">The only measured input. Everything below is yours to change.</p></div>' +
@@ -1396,6 +1447,9 @@
       fields.forEach(function (f) {
         document.getElementById("pbv-" + f[0]).textContent =
           (f[2].indexOf("₹") === 0 ? "₹ " : "") + fmt(PB[f[0]], f[5] < 1 ? 2 : 0) + (f[2] && f[2].indexOf("₹") !== 0 ? " " + f[2] : f[2].replace("₹", ""));
+        if (f[0] === "size") {
+          document.getElementById("pbv-size").textContent = PB.size ? "medium (3 %)" : "micro/small (5 %)";
+        }
       });
       var kwhYr = PB.kwhDay * PB.furnaces * PB.days * v.saving_pct / 100;
       var inrYr = kwhYr * PB.rate;
@@ -1422,6 +1476,19 @@
           return '<p class="pb-line pb-esco"><b>Pay from savings, no upfront cost:</b> the SME keeps <b class="num">₹ ' + fmt(keep, 0) +
             "</b> a year from day one; JouleMitra receives " + PB.share + " % of verified savings, recovers the kit in <b class=\"num\">" +
             (rec != null ? fmt(rec, 1) + " months" : "—") + "</b> and <b class=\"num\">₹ " + fmt(toJm * PB.years, 0) + "</b> over " + PB.years + " years.</p>";
+        })() +
+        (function () {
+          /* ADEETIE finance: BEE ADEETIE operational guidelines, PIB 15 Jul
+           * 2025 — 5 % subvention for micro/small, 3 % for medium, on up to
+           * 75 % of loans Rs 10 lakh to Rs 15 crore, net borrowing rate floor 2 %. */
+          var sub = PB.size ? 3 : 5;
+          var rateA = Math.min(sub, PB.bank - 2);
+          if (!(rateA > 0)) rateA = 0;
+          var savedA = PB.loan * 0.75 * rateA / 100;
+          var line = "ADEETIE: <b>₹ " + esc(fmt(savedA, 0)) + "</b> less interest in year one (" + sub +
+            " % on 75 % of the loan, simple, first year). Paid only if M&amp;V shows \u2265 10 % — verified so far: " +
+            esc(fmt(v.saving_pct, 1)) + " %" + (v.saving_pct < 10 ? " — not yet eligible." : ".");
+          return '<p class="pb-line"><b>Finance the retrofit with ADEETIE.</b><br>' + line + " " + badge("PROJECTED", "projected") + "</p>";
         })() +
         '<table class="pb-scale"><thead><tr><th>Rolled out to</th><th>Energy saved / yr</th><th>Money saved / yr</th><th>CO₂ avoided / yr</th></tr></thead><tbody>' + scale + "</tbody></table>" +
         '<p class="note">Projection: assumes every site matches the verified ' + fmt(v.saving_pct, 1) + " % and the inputs on the left. " + badge("PROJECTED", "projected") + "</p>";
@@ -1555,7 +1622,13 @@
       '<span class="band best" style="left:' + pos(PUB_BANDS.best[0]) + ";width:calc(" + pos(PUB_BANDS.best[1]) + " - " + pos(PUB_BANDS.best[0]) + ')">best in class</span>' +
       '<span class="band typ" style="left:' + pos(PUB_BANDS.typical[0]) + ";width:calc(" + pos(PUB_BANDS.typical[1]) + " - " + pos(PUB_BANDS.typical[0]) + ')">typical Indian foundry</span>' +
       heats.filter(function (h) { return h.sec != null; }).map(function (h) { return '<i class="dot" style="left:' + pos(h.sec) + '"></i>'; }).join("") +
-      (med != null ? '<b class="med" style="left:' + pos(med) + '">median ' + esc(fmt(med, 0)) + "</b>" : "") +
+      (med != null ? (function () {
+        /* Clamp the label inside the strip so it never slides off the left
+         * edge or over the panel title when the median is near the axis start. */
+        var raw = (Math.min(Math.max(med, lo), hi) - lo) / (hi - lo) * 100;
+        var cl = Math.min(96, Math.max(4, raw)).toFixed(2) + "%";
+        return '<b class="med" style="left:' + cl + '">median ' + esc(fmt(med, 0)) + "</b>";
+      })() : "") +
       "</div>" + '<div class="bench-axis">' + [400, 500, 600, 700, 800, 900, 1000].map(function (v) {
         return '<span style="left:' + pos(v) + '">' + v + "</span>"; }).join("") + '<span class="u">kWh per tonne</span></div>' +
       '<p class="note trace" data-trail="bench" tabindex="0">Ranges: BEE/SAMEEEKSHA foundry cluster studies and industry benchmarks. Each dot is one heat.</p>';
@@ -1657,17 +1730,56 @@
     var tGood = good / 1000;
     var tco2 = f ? pkwh * f.value_kg_per_kwh / 1000 : null;
     var per = tco2 != null && tGood ? tco2 / tGood : null;
+    /* CBAM data sheet: EU CBAM Regulation 2023/956 Annex II; definitive period
+     * from 1 Jan 2026. Iron/steel castings are CBAM goods (no SME exemption);
+     * for iron and steel only DIRECT emissions are priced — electricity
+     * (indirect) emissions are reported, not priced. Without measured
+     * installation data the EU default value is used, usually higher. */
     document.getElementById("bill-carbon").innerHTML = per == null ? naHtml("emission factor or output missing") :
       '<div class="kpi"><span class="num">' + esc(fmt(per, 2)) + '</span><span class="unit">t CO₂ per tonne of good castings</span></div>' +
       "<p>" + esc(fmt(pkwh, 0)) + " kWh for " + esc(fmt(tGood, 2)) + " t good output, grid factor " + esc(fmt(f.value_kg_per_kwh, 2)) + " " + esc(f.unit) + " (" + esc(f.version) +
-      ", provisional). Electricity only: an EU CBAM declaration also needs direct emissions and purchased inputs.</p>" +
+      ", provisional).</p>" +
+      '<div class="cbam-sheet">' +
+      "<p>Indirect (electricity), measured: <b class=\"num\">" + esc(fmt(per, 2)) + "</b> t CO₂/t — reported in the CBAM communication; not priced for castings.</p>" +
+      '<p class="note">Direct = your fuel and process records. EU default = the value for your CN code. Only direct emissions are priced for castings. JouleMitra measures the electricity part only.</p>' +
+      '<div class="cbam-row">' +
+      '<label class="cbam-field"><span>Direct, t CO₂/t</span><input type="number" id="cbam-direct" min="0" step="0.01"></label>' +
+      '<label class="cbam-field"><span>EU default, t CO₂/t</span><input type="number" id="cbam-default" min="0" step="0.01"></label>' +
+      '<label class="cbam-field"><span>CBAM price, €/t</span><input type="number" id="cbam-price" min="0" step="1" placeholder="e.g. 75"></label>' +
+      "</div>" +
+      '<p class="note" id="cbam-result" aria-live="polite"></p>' +
+      "</div>" +
       '<button type="button" class="btn" id="carbon-csv">Download carbon statement (CSV)</button>';
-    document.getElementById("carbon-csv").addEventListener("click", function () {
+    (function cbamWire() {
+      function cbamResult() {
+        var box = document.getElementById("cbam-result");
+        if (!box) return;
+        var dEl = document.getElementById("cbam-direct"), gEl = document.getElementById("cbam-default"), pEl = document.getElementById("cbam-price");
+        if (!dEl || !gEl || !pEl) return;
+        var d = parseFloat(dEl.value), dflt = parseFloat(gEl.value), price = parseFloat(pEl.value);
+        if (isFinite(d) && isFinite(dflt) && isFinite(price)) {
+          var y = (dflt - d) * price;
+          box.innerHTML = "Using your measured direct emissions instead of the default: <b>\u20AC" + esc(fmt(Math.abs(y), 2)) + "</b> " +
+            (y >= 0 ? "less" : "more") + " per tonne shipped ((default \u2212 direct) \u00D7 price). " + badge("ASSUMPTION");
+        } else {
+          box.textContent = "Fill the three boxes to see what measured data is worth per tonne exported.";
+        }
+      }
+      var ids = ["cbam-direct", "cbam-default", "cbam-price"], i, el;
+      for (i = 0; i < ids.length; i++) {
+        el = document.getElementById(ids[i]);
+        if (el) el.addEventListener("input", cbamResult);
+      }
+      cbamResult();
+    })();
+    var csvBtn = document.getElementById("carbon-csv");
+    if (csvBtn) csvBtn.addEventListener("click", function () {
       var lines = [
         ["field", "value"], ["period_end", nowIso()], ["scope", "Scope 2 electricity only"],
         ["machines", mids.join(" ")], ["electricity_kwh", pkwh.toFixed(1)], ["good_output_t", tGood.toFixed(3)],
         ["grid_factor", f.value_kg_per_kwh], ["grid_factor_unit", f.unit], ["grid_factor_version", f.version],
         ["grid_factor_source_class", f.source_class], ["tco2", tco2.toFixed(3)], ["tco2_per_t_good", per.toFixed(3)],
+        ["indirect_tco2_per_t_castings", per.toFixed(3)],
         ["data_source", "SIMULATED"], ["note", "provisional factor; not for external accounting until confirmed"]
       ];
       var blob = new Blob([lines.map(function (l) { return l.join(","); }).join("\n")], { type: "text/csv" });
@@ -1870,11 +1982,10 @@
     controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.46;
     scene.add(new THREE.HemisphereLight(0xf5f5f0, 0x4a5160, 0.95));
     var sun = new THREE.DirectionalLight(0xffffff, 0.6); sun.position.set(6, 12, 8); scene.add(sun);
-    /* theme b: dark control-room floor and grid so the lit machines read */
-    var darkB = document.documentElement.dataset.theme === "b";
-    var floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(22, 12), new THREE.MeshStandardMaterial({ color: darkB ? 0x161d29 : 0xe4e5df, roughness: 1 }));
+    /* dark control-room floor and grid so the lit machines read */
+    var floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(22, 12), new THREE.MeshStandardMaterial({ color: 0x161d29, roughness: 1 }));
     floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.y = 0; scene.add(floorMesh);
-    var grid = new THREE.GridHelper(22, 22, darkB ? 0x334052 : 0xc9ccc4, darkB ? 0x232c3d : 0xd6d8d2); grid.scale.z = 12 / 22; grid.position.y = 0.01; scene.add(grid);
+    var grid = new THREE.GridHelper(22, 22, 0x334052, 0x232c3d); grid.scale.z = 12 / 22; grid.position.y = 0.01; scene.add(grid);
     var mat = function (c, o) { return new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.55, metalness: 0.3 }, o || {})); };
     var alertM = {}; anoms.forEach(function (a) { alertM[a.machine_id] = true; });
     var byId = {}; rows.forEach(function (m) { byId[m.machine_id] = m; });
@@ -1895,7 +2006,7 @@
     var motor = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.1, 24), mat(0x3b4b8a)); motor.rotation.z = Math.PI / 2; motor.position.set(-0.4, 0.5, 0); pz.add(motor);
     var volute = new THREE.Mesh(new THREE.SphereGeometry(0.45, 20, 16), mat(0x7a828c)); volute.position.set(0.55, 0.5, 0); pz.add(volute);
     /* meter panel, gateway, server */
-    var panel = group(-1, -3.8), pnl = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2, 0.5), mat(darkB ? 0x2a3340 : 0xdfe2dc)); pnl.position.y = 1; panel.add(pnl);
+    var panel = group(-1, -3.8), pnl = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2, 0.5), mat(0x2a3340)); pnl.position.y = 1; panel.add(pnl);
     var gw = group(3.2, -3.8), gwm = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.5), mat(0x2f5bd3)); gwm.position.y = 1.2; gw.add(gwm);
     var srv = group(6.2, -3.8), srvm = new THREE.Mesh(new THREE.BoxGeometry(1, 2.2, 0.9), mat(0x1b2430)); srvm.position.y = 1.1; srv.add(srvm);
     var parts = [["furnace-01", fz, fBody], ["compressor-01", cz, skid], ["pump-01", pz, motor]];
@@ -1915,7 +2026,7 @@
       var curve = new THREE.CatmullRomCurve3([a, new THREE.Vector3(a.x, 0.15, mid.z), new THREE.Vector3(b.x, 0.15, mid.z), b]);
       var kw = m.latest_power_kw || 0, maxKw = Math.max.apply(null, rows.map(function (r) { return r.latest_power_kw || 0; }).concat([1]));
       var cab = new THREE.Mesh(new THREE.TubeGeometry(curve, 60, 0.05 + 0.1 * kw / maxKw, 8, false),
-        mat(alertM[p[0]] ? 0xe8541c : (darkB ? 0xb9c2d4 : 0x1b2430), { emissive: alertM[p[0]] ? 0xe8541c : 0x000000, emissiveIntensity: 0.4 }));
+        mat(alertM[p[0]] ? 0xe8541c : 0xb9c2d4, { emissive: alertM[p[0]] ? 0xe8541c : 0x000000, emissiveIntensity: 0.4 }));
       scene.add(cab);
       var dots = [];
       for (var k = 0; k < 4; k++) { var d = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), mat(0xfff1c2, { emissive: 0xffc861, emissiveIntensity: 1 })); scene.add(d); dots.push(d); }
@@ -1998,6 +2109,71 @@
     });
   });
 
+  /* ================= judge tour =================
+   * A guided walk through the loop: eight captioned stops. Step 2 opens the
+   * fault panel so the judge picks the air-leak fault themselves. */
+  var TOUR = [
+    ["plant", "A small foundry: compressor, induction furnace, cooling pump. Every number here is live from the simulator."],
+    ["plant", "Break something. Pick \u2018Air leak on the compressor\u2019 \u2014 it rewrites 4 hours of simulated data."],
+    ["detect", "Detected: energy above what the work needed, while output stayed the same."],
+    ["health", "Health and energy together: is it wear, or process waste?"],
+    ["optimise", "Plan tomorrow: same output, heats moved to cheaper tariff hours."],
+    ["act", "A person approves every step, from suggestion to proof."],
+    ["impact", "Proven: measured against what would have happened anyway, with an error band."],
+    ["payback", "What it pays back, and how a government scheme can finance it."]
+  ];
+  var tourIdx = -1, tourTimer = null;
+  function tourBar() {
+    var bar = document.getElementById("tour-bar");
+    if (bar) return bar;
+    bar = document.createElement("div");
+    bar.id = "tour-bar";
+    bar.innerHTML = '<span class="tour-step" id="tour-step"></span>' +
+      '<span class="tour-caption" id="tour-caption" aria-live="polite"></span>' +
+      '<span class="tour-btns"><button type="button" class="btn sm" id="tour-prev">Prev</button>' +
+      '<button type="button" class="btn sm" id="tour-next">Next</button>' +
+      '<button type="button" class="btn sm ghost" id="tour-close">Close</button></span>';
+    document.getElementById("stage").appendChild(bar);
+    document.getElementById("tour-prev").addEventListener("click", function () { tourGo(tourIdx - 1); });
+    document.getElementById("tour-next").addEventListener("click", function () { tourGo(tourIdx + 1); });
+    document.getElementById("tour-close").addEventListener("click", endTour);
+    return bar;
+  }
+  function tourArm() {
+    if (tourTimer) { clearTimeout(tourTimer); tourTimer = null; }
+    if (tourIdx === 1) return; /* step 2 waits for Next */
+    if (tourIdx >= 0 && tourIdx < TOUR.length - 1) {
+      tourTimer = setTimeout(function () { tourGo(tourIdx + 1); }, 20000);
+    }
+  }
+  function tourGo(i) {
+    if (i < 0) i = 0;
+    if (i >= TOUR.length) { endTour(); return; }
+    tourIdx = i;
+    var bar = tourBar();
+    bar.style.display = "";
+    document.getElementById("stage").classList.add("touring");
+    document.getElementById("tour-step").textContent = "step " + (i + 1) + " / " + TOUR.length;
+    document.getElementById("tour-caption").textContent = TOUR[i][1];
+    if (i === 1) openFaults();
+    if (window.location.hash !== "#" + TOUR[i][0]) window.location.hash = "#" + TOUR[i][0];
+    else show();
+    tourArm();
+  }
+  function startTour() { tourGo(0); }
+  function endTour() {
+    tourIdx = -1;
+    if (tourTimer) { clearTimeout(tourTimer); tourTimer = null; }
+    var bar = document.getElementById("tour-bar");
+    if (bar) bar.style.display = "none";
+    document.getElementById("stage").classList.remove("touring");
+    closeFaults();
+  }
+  document.getElementById("tour-start").addEventListener("click", startTour);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && tourIdx >= 0) endTour();
+  });
+
   /* ?selftest=1: tariff wrap self-check (console only, no UI change). */
   (function selftest() {
     if (!new URLSearchParams(window.location.search).has("selftest")) return;
@@ -2060,9 +2236,39 @@
   }
   function show() {
     var s = current();
+    var prev = show._cur || null;
+    var sIdx = SCREENS.indexOf(s), pIdx = prev ? SCREENS.indexOf(prev) : -1;
     SCREENS.forEach(function (k) {
-      document.getElementById("screen-" + k).classList.toggle("active", k === s);
+      var scr = document.getElementById("screen-" + k);
+      if (!scr) return;
+      scr.classList.toggle("active", k === s);
+      if (k !== s) scr.classList.remove("leaving");
     });
+    /* Outgoing screen fades out in place while the incoming fades in and
+     * slides 16 px -> 0 in the direction of travel (next = from right,
+     * previous = from left). Transform/opacity only, no layout animation. */
+    if (prev && prev !== s && !reducedMotion()) {
+      var dir = sIdx >= pIdx ? 1 : -1;
+      var oldEl = document.getElementById("screen-" + prev);
+      var newEl = document.getElementById("screen-" + s);
+      if (oldEl && oldEl.animate) {
+        oldEl.classList.add("leaving");
+        var fade = oldEl.animate([{ opacity: 1 }, { opacity: 0 }],
+          { duration: 200, easing: EASE_OUT });
+        (function (leaver, anim) {
+          function done() { leaver.classList.remove("leaving"); }
+          if (anim && anim.finished) anim.finished.then(done, done);
+          else setTimeout(done, 220);
+        })(oldEl, fade);
+      }
+      if (newEl && newEl.animate) {
+        newEl.animate(
+          [{ opacity: 0, transform: "translateX(" + dir * 16 + "px)" },
+           { opacity: 1, transform: "translateX(0px)" }],
+          { duration: 260, easing: EASE_OUT });
+      }
+    }
+    show._cur = s;
     document.querySelectorAll(".nav-step").forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-screen") === s);
     });
@@ -2071,6 +2277,7 @@
      * (used to capture the provenance panel for the deck). */
     Promise.resolve(loaders[s]()).then(function () {
       refreshCHero(s);
+      animateHeroNumbers(document.getElementById("screen-" + s));
       var t = new URLSearchParams(window.location.search).get("trail");
       if (t) openTrail(t);
     });
@@ -2098,4 +2305,5 @@
 
   if (!window.location.hash) window.location.hash = "#plant";
   show();
+  if (new URLSearchParams(window.location.search).has("tour")) startTour();
 })();
