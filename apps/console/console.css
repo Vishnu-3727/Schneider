@@ -795,6 +795,35 @@ html.static .screen.leaving { display: none; }
 #screen-act #act-rec .note { font-size: var(--text-micro); line-height: 1.35; }
 #screen-act .audit-list li { padding: var(--space-1) 0; font-size: 0.85rem; }
 
+/* ---- plan reconciliation + board source labels (flat note text) ---- */
+.opt-src { flex-basis: 100%; font-size: var(--text-label); color: var(--color-ink-2); }
+#opt-recon { margin: var(--space-1) 0 0 0; }
+#screen-optimise .pl-live { flex-wrap: wrap; align-items: baseline; }
+.pl-src { font-weight: 600; color: var(--color-ink-2); }
+
+/* ---- flow-layout nav cues: hidden on the desktop stage ---- */
+.flow-wrap { display: contents; }
+.flow-nav, .flow-step { display: none; }
+.nav-step:focus-visible { outline: var(--ring-width) solid var(--color-projected); outline-offset: 2px; }
+
+/* Flow layout: step counter + edge chevrons for the sideways nav. */
+@media (max-width: 1100px), (orientation: portrait) {
+  .flow-wrap { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+  .flow-wrap .flow { flex: 1; min-width: 0; }
+  .flow-nav {
+    display: none; align-items: center; justify-content: center; flex: none;
+    min-width: 44px; width: 44px; min-height: 44px; height: 44px;
+    font-size: 1.5rem; line-height: 1; padding: 0;
+    background: var(--color-paper); color: var(--color-ink);
+    border: var(--border-thin) solid var(--color-rule); border-radius: var(--radius-pill);
+    cursor: pointer;
+  }
+  .flow-nav.on { display: inline-flex; }
+  .flow-nav:focus-visible { outline: var(--ring-width) solid var(--color-projected); outline-offset: 2px; }
+  .flow-step { display: inline; margin-left: var(--space-2); font-size: var(--text-label); color: var(--color-ink-2); white-space: nowrap; }
+  .flow .nav-step { min-height: 44px; }
+}
+
 /* Flow layout: plant diagram scrolls inside its own box; desktop-only
  * numeral sizes are reset to the small flow sizes. */
 @media (max-width: 1100px), (orientation: portrait) {

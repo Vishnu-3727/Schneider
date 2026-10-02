@@ -760,12 +760,13 @@
     });
     return { kwh: kwh, inr: inr, eveningPct: kwh ? peakE / kwh * 100 : 0 };
   }
-  function renderPlanner(run, tp, rated, mid) {
+  function renderPlanner(run, tp, rated, mid, optDelta) {
     var box = document.getElementById("opt-chart");
     var cur = run.current_schedule || run.current || {}, rec = run.recommended_schedule || run.recommended || {};
     var slotMin = rec.slot_min || 15, nSlots = rec.n_slots || 96;
     if (!rec.heats || !rec.heats.length) { box.innerHTML = naHtml("no recommended schedule in this run"); return; }
     PLAN = rec.heats.map(function (h) { return Object.assign({}, h); });
+    var initJson = JSON.stringify(rec.heats);
     var today = planCost(cur.heats || [], tp, rated, slotMin);
     var maxRate = Math.max.apply(null, tp.map(function (t) { return t.rate; }).concat([1]));
     var pct = function (slot) { return (slot / nSlots * 100) + "%"; };
@@ -790,14 +791,36 @@
       '<div class="pl-lane"><span class="pl-name">Your plan</span><div class="pl-track" id="pl-track">' + blocks(PLAN, "plan") + "</div></div>" +
       '<div class="pl-axis">' + [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24].map(function (h) {
         return '<span style="left:' + (h / 24 * 100) + '%">' + String(h).padStart(2, "0") + ":00</span>"; }).join("") + "</div></div>" +
-      '<p class="note" id="pl-msg">Drag a heat in your plan (or focus it and use ← →). Figures here are the furnace model’s estimate; the optimiser’s own numbers are above. ' + badge("PROJECTED", "projected") + "</p>";
+      '<p class="note" id="pl-msg">Drag a heat in your plan (or focus it and use ← →). Board figures use the simple furnace model; the headline uses the optimiser’s fitted model. ' + badge("PROJECTED", "projected") + "</p>";
     var track = document.getElementById("pl-track");
+    /* Rupee delta with the sign before the ₹ (e.g. −₹495 a day). */
+    function inrSign(v) {
+      var a = fmt(Math.abs(v), 0);
+      if (v < 0) return "−₹" + a;
+      if (v > 0) return "+₹" + a;
+      return "₹" + a;
+    }
+    function updateRecon(d) {
+      var el = document.getElementById("opt-recon");
+      if (!el) return;
+      if (optDelta == null || d == null || !isFinite(d)) { el.textContent = ""; return; }
+      if (JSON.stringify(PLAN) === initJson) {
+        el.textContent = "Same schedule, two models: the optimiser says " + inrSign(optDelta) +
+          " a day and the board says " + inrSign(d) + ". The gap comes from the energy model, not the schedule.";
+      } else {
+        el.textContent = "The board now shows your own plan, so it no longer matches the optimiser’s figure above.";
+      }
+    }
     function live() {
       var p = planCost(PLAN, tp, rated, slotMin), d = p.inr - today.inr;
+      var pb = today.inr ? d / today.inr * 100 : null;
       document.getElementById("pl-live").innerHTML =
+        '<span class="pl-src">Board estimate (simple furnace model, heat time only):</span>' +
         '<span><b class="num">₹' + esc(fmt(p.inr, 0)) + "</b> your plan</span><span><b class=\"num\">₹" + esc(fmt(today.inr, 0)) + "</b> today</span>" +
-        '<span class="' + (d <= 0 ? "good" : "bad") + '"><b class="num">' + esc(signed(d, 0)) + "</b> ₹ a day</span>" +
+        '<span class="' + (d <= 0 ? "good" : "bad") + '"><b class="num">' + esc(inrSign(d)) + "</b> a day" +
+        (pb != null && isFinite(pb) ? " <span>(" + esc(signed(pb, 1)) + " % of today’s heat-time cost)</span>" : "") + "</span>" +
         "<span>share in the dearest tariff hours <b class=\"num\">" + esc(fmt(today.eveningPct, 0)) + " % → " + esc(fmt(p.eveningPct, 0)) + " %</b></span>";
+      updateRecon(d);
     }
     function fits(i, s) {
       var L = heatSlots(PLAN[i]);
@@ -1028,7 +1051,7 @@
     var chart = document.getElementById("opt-chart");
     var strip = document.getElementById("opt-tariff");
     var explain = document.getElementById("opt-explain");
-    Array.prototype.forEach.call(document.querySelectorAll(".opt-hero"), function (n) { n.remove(); });
+    Array.prototype.forEach.call(document.querySelectorAll(".opt-hero, #opt-recon"), function (n) { n.remove(); });
     var machines = await api("/machines");
     var run = null, mid = null;
     for (var i = 0; machines && !machines.error && i < machines.length; i++) {
@@ -1045,27 +1068,31 @@
     document.getElementById("opt-title").textContent = mid + " — drag the heats, or let the optimiser plan (" + (run.status || "?") + ")";
     var tp = ((run.metrics || {}).tariff_periods) || [];
     var mrow = machines.filter(function (m) { return m.id === mid; })[0] || {};
-    if (mrow.rated_power_kw) renderPlanner(run, tp, mrow.rated_power_kw, mid);
-    else chart.innerHTML = naHtml("rated power not returned for " + mid);
-    var illustrative = tp.length && tp.every(function (t) { return t.source_class === "ASSUMPTION"; });
-    strip.innerHTML = tp.map(function (t) {
-      return '<span class="chip">' + esc(t.period) + ' · <span class="num">' + esc(fmt(t.rate, 1)) + "</span> INR/kWh</span>";
-    }).join("") + (illustrative ? badge("illustrative tariff", "accent") : badge("plant tariff"));
     var m = run.metrics || {};
     var cur = m.current || {}, rec = m.recommended || {};
-    /* Cost delta is the headline KPI, computed from current vs recommended. */
+    /* Cost delta is the headline KPI, computed from current vs recommended.
+     * Whole-day baseline: the optimiser's fitted energy model (heats + idle
+     * + fixed load), not the board's heat-time-only furnace model. */
     var curC = valOf(cur.cost_inr), recC = valOf(rec.cost_inr);
     var dC = (curC != null && recC != null) ? recC - curC : null;
     var pC = (dC != null && curC) ? dC / curC * 100 : null;
     var heroHtml = '<div class="opt-hero">' +
       (dC != null
         ? '<span class="hero-delta">' + esc(signed(dC, 0)) + ' INR per day</span>' +
-          '<span class="num">(' + esc(signed(pC, 1)) + '%)</span>' +
+          '<span class="num">(' + esc(signed(pC, 1)) + " % of today’s whole-day cost)</span>" +
           (dC < 0 ? '<span class="opt-year">≈ ₹' + esc(fmt(-dC * 365 / 100000, 1)) +
-            " lakh a year if every day ran this way</span>" : "")
+            " lakh a year at this optimiser estimate, if every day ran this way</span>" : "") +
+          '<span class="opt-src">Optimiser estimate · fitted energy model, whole day (heats + idle + fixed load).</span>'
         : dashBig()) +
-      " " + badge("PROJECTED", "projected") + "</div>";
+      " " + badge("PROJECTED", "projected") + "</div>" +
+      '<p class="note" id="opt-recon"></p>';
+    var illustrative = tp.length && tp.every(function (t) { return t.source_class === "ASSUMPTION"; });
+    strip.innerHTML = tp.map(function (t) {
+      return '<span class="chip">' + esc(t.period) + ' · <span class="num">' + esc(fmt(t.rate, 1)) + "</span> INR/kWh</span>";
+    }).join("") + (illustrative ? badge("illustrative tariff", "accent") : badge("plant tariff"));
     strip.insertAdjacentHTML("beforebegin", heroHtml);
+    if (mrow.rated_power_kw) renderPlanner(run, tp, mrow.rated_power_kw, mid, dC);
+    else chart.innerHTML = naHtml("rated power not returned for " + mid);
     /* Say in one sentence what changes; the solver's own text stays in the API. */
     var dE = (valOf(cur.energy_kwh) != null && valOf(rec.energy_kwh) != null) ? valOf(rec.energy_kwh) - valOf(cur.energy_kwh) : null;
     var dP = (valOf(cur.peak_kw) != null && valOf(rec.peak_kw) != null) ? valOf(rec.peak_kw) - valOf(cur.peak_kw) : null;
@@ -2272,6 +2299,22 @@
     document.querySelectorAll(".nav-step").forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-screen") === s);
     });
+    /* Flow layout: step counter next to the brand, and keep the active
+     * step centred inside the sideways-scrolling nav without moving the
+     * page vertically (adjust the nav's scrollLeft only). */
+    var stepEl = document.getElementById("flow-step");
+    if (stepEl) stepEl.textContent = "step " + (SCREENS.indexOf(s) + 1) + " of " + SCREENS.length;
+    (function centreNav() {
+      var nav = document.getElementById("flow") || document.querySelector("nav.flow");
+      if (!nav) return;
+      var active = nav.querySelector('.nav-step[data-screen="' + s + '"]');
+      if (!active) return;
+      var left = active.offsetLeft - nav.clientWidth / 2 + active.offsetWidth / 2;
+      try {
+        nav.scrollTo({ left: Math.max(0, left), behavior: reducedMotion() ? "auto" : "smooth" });
+      } catch (e) { nav.scrollLeft = Math.max(0, left); }
+      updateFlowNav();
+    })();
     closeTrail();
     /* ?trail=<key> opens a number's trail once the screen has loaded
      * (used to capture the provenance panel for the deck). */
@@ -2284,6 +2327,34 @@
   }
   window.addEventListener("hashchange", show);
 
+  /* Flow layout: chevron cues for the sideways-scrolling nav. Each button
+   * shows only while there is more nav in that direction; clicking scrolls
+   * by about 70 % of the nav width. Flat buttons, real <button>s. */
+  function updateFlowNav() {
+    var nav = document.getElementById("flow") || document.querySelector("nav.flow");
+    var prev = document.getElementById("flow-prev"), next = document.getElementById("flow-next");
+    if (!nav || !prev || !next) return;
+    var max = nav.scrollWidth - nav.clientWidth;
+    prev.classList.toggle("on", nav.scrollLeft > 1);
+    next.classList.toggle("on", max > 1 && nav.scrollLeft < max - 1);
+  }
+  (function wireFlowNav() {
+    var nav = document.getElementById("flow") || document.querySelector("nav.flow");
+    var prev = document.getElementById("flow-prev"), next = document.getElementById("flow-next");
+    if (!nav || !prev || !next) return;
+    function step(dir) {
+      var amt = nav.clientWidth * 0.7;
+      try {
+        nav.scrollBy({ left: dir * amt, behavior: reducedMotion() ? "auto" : "smooth" });
+      } catch (e) { nav.scrollLeft += dir * amt; }
+    }
+    prev.addEventListener("click", function () { step(-1); });
+    next.addEventListener("click", function () { step(1); });
+    nav.addEventListener("scroll", updateFlowNav);
+    window.addEventListener("resize", updateFlowNav);
+    updateFlowNav();
+  })();
+
   /* The stage is a fixed 16:9 canvas; scale it to fit the window so the
    * browser shows exactly what the PPT slide shows. Narrow windows and
    * portrait tablets use the flow layout instead (same query as
@@ -2293,6 +2364,7 @@
     var st = document.getElementById("stage");
     if (window.matchMedia && window.matchMedia(FLOW_Q).matches) {
       document.documentElement.style.setProperty("--scale", "1");
+      updateFlowNav();
       return;
     }
     var s = Math.min(window.innerWidth / st.offsetWidth, window.innerHeight / st.offsetHeight);
