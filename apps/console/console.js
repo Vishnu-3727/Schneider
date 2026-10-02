@@ -713,8 +713,8 @@
       ilist.innerHTML = items.slice(0, 5).map(function (it) {
         var when = (it.window_start && it.window_end)
           ? "<p>" + esc(fmtRange(it.window_start, it.window_end)) + "</p>" : "";
-        var CAT = { ENERGY_ONLY: "Energy problem, machine healthy", HEALTH_ONLY: "Machine wear, energy normal",
-          COINCIDENT: "Energy and wear together", ENERGY_ONLY_HEALTH_UNAVAILABLE: "Energy problem, health unknown" };
+        var CAT = { ENERGY_ONLY: "Unusual energy use, health signals normal", HEALTH_ONLY: "Unusual health signals, energy normal: possible wear, inspect",
+          COINCIDENT: "Unusual energy and health signals together: inspect", ENERGY_ONLY_HEALTH_UNAVAILABLE: "Unusual energy use, health data missing" };
         return '<div class="insight"><div>' + badge(CAT[it.category] || it.category, it.category === "COINCIDENT" ? "accent" : "") +
           " <strong>" + esc(it.machine_id || "") + "</strong></div>" + when +
           "<p>" + txt(it.text || "") + "</p>" +
@@ -972,6 +972,10 @@
     var rated = f.rated_power_kw || null;
     var periods = await tariffPeriods();
     var hs = await heatStats();
+    /* Grid CO2 factor with its source (same endpoint the bill screen uses);
+     * fetched once here, not on every slider move. No hard-coded fallback. */
+    var efs = await api("/emission-factors");
+    var ef = ((efs && efs.emission_factors) || []).slice(-1)[0] || null;
     var box = document.getElementById("twin-3d");
     if (!twinCtx) twinCtx = buildTwin3d(box);
     if (!rated) { document.getElementById("twin-out").innerHTML = naHtml("furnace rated power not returned"); return; }
@@ -998,12 +1002,19 @@
        * so rank this heat the same way and show the gap on its own. */
       var gapKwh = r.rows[3].kwh, secHeat = (r.kwh - gapKwh) / (TW.charge / 1000);
       var rank = hs ? hs.heats.filter(function (h) { return h.sec != null && h.sec < secHeat; }).length : null;
+      var co2Kpi, co2Note = "";
+      if (ef && ef.value_kg_per_kwh != null && isFinite(ef.value_kg_per_kwh)) {
+        co2Kpi = '<div><span class="num">' + esc(fmt(r.kwh * ef.value_kg_per_kwh, 0)) + '</span><span class="unit">kg CO₂, grid factor ' + esc(fmt(ef.value_kg_per_kwh, 2)) + " " + esc(ef.unit) + "</span></div>";
+        co2Note = '<p class="note">CO₂ factor: ' + esc(ef.source_name) + " " + esc(ef.version) + ", " + esc(ef.fiscal_year) + ", " + esc(ef.geography) + ", CO₂ only. Provisional: confirm against the CEA user guide. " + badge(ef.source_class) + " " + badge("provisional", "accent") + "</p>";
+      } else {
+        co2Kpi = '<div><span class="num">—</span><span class="unit">kg CO₂ (emission factor unavailable)</span></div>';
+      }
       document.getElementById("twin-out").innerHTML =
         '<div class="tw-kpis">' +
-        '<div><span class="num tw-big">' + esc(fmt(r.sec, 0)) + '</span><span class="unit">kWh per tonne</span></div>' +
-        '<div><span class="num">' + esc(fmt(r.kwh, 0)) + '</span><span class="unit">kWh this heat</span></div>' +
+        '<div><span class="num tw-big">' + esc(fmt(r.sec, 0)) + '</span><span class="unit">kWh per tonne, including the gap</span></div>' +
+        '<div><span class="num">' + esc(fmt(r.kwh, 0)) + '</span><span class="unit">kWh this heat, including the gap</span></div>' +
         '<div><span class="num">₹' + esc(fmt(r.inr + r.superKwh * (avgRate(periods) || 0), 0)) + '</span><span class="unit">at the tariff of those hours</span></div>' +
-        '<div><span class="num">' + esc(fmt(r.kwh * 0.71, 0)) + '</span><span class="unit">kg CO₂ (0.71 factor)</span></div></div>' +
+        co2Kpi + "</div>" +
         '<div class="tw-bar">' + r.rows.map(function (x) {
           return '<span class="seg s-' + x.state + '" style="flex-grow:' + x.kwh.toFixed(2) + '" title="' + esc(x.state) + '"></span>';
         }).join("") + (r.superKwh ? '<span class="seg s-over" style="flex-grow:' + r.superKwh.toFixed(2) + '"></span>' : "") + "</div>" +
@@ -1011,7 +1022,8 @@
           return esc(x.gap ? (TW.hot ? "gap kept hot" : "gap switched off") : x.state) + " " + esc(fmt(x.min, 0)) + " min · " + esc(fmt(x.kwh, 0)) + " kWh";
         }).join("  |  ") + (r.superKwh ? "  |  extra superheat " + esc(fmt(r.superKwh, 1)) + " kWh" : "") + "</p>" +
         (hs ? '<p class="tw-compare">Yesterday’s ' + hs.heats.length + " measured heats ran " + esc(fmt(hs.best, 0)) + "–" + esc(fmt(hs.worst, 0)) +
-          " kWh/t. This heat on its own is <b>" + esc(fmt(secHeat, 0)) + " kWh/t</b>, rank <b>" + (rank + 1) + " of " + (hs.heats.length + 1) + "</b>" + (rank === 0 ? ", better than all of them" : "") + ". The gap adds " + esc(fmt(gapKwh, 0)) + " kWh" + (TW.hot ? " because the furnace is kept hot." : " while switched off.") + "</p>" : "") +
+          " kWh/t (heat cycle only, gap excluded). This heat, heat cycle only: <b>" + esc(fmt(secHeat, 0)) + " kWh/t</b>, rank <b>" + (rank + 1) + " of " + (hs.heats.length + 1) + "</b>" + (rank === 0 ? ", better than all of them" : "") + ". The gap adds " + esc(fmt(gapKwh, 0)) + " kWh" + (TW.hot ? " because the furnace is kept hot" : " while switched off") + ", which is why the headline figure is higher.</p>" : "") +
+        co2Note +
         '<p class="note">Model: the simulator’s furnace (rated ' + rated + " kW, melt rate 500 kg/h, power per state), " +
         "superheat 0.33 kWh/t per °C above 1550 °C. " + badge("MODEL") + " " + badge("illustrative tariff") + "</p>";
       if (twinCtx && !twinCtx.running) twinCtx.setState(1, TW.hot ? 1480 : 900, TW.hot ? 0.45 : 0.08);
@@ -2130,7 +2142,7 @@
       log.innerHTML = "<p><b>Done.</b> " + esc(fmtRange(out.window_start, out.window_end)) + " rewritten as " + esc(out.scenario) + ".</p>" +
         (out.events.length ? "<ul>" + out.events.map(function (e) {
           return "<li><b>" + esc(e.machine_id) + "</b>: " + esc(ruleName(e.rule_id)) + (e.deviation_pct != null ? " (" + esc(signed(e.deviation_pct, 1)) + " %)" : "") + "</li>";
-        }).join("") + "</ul>" : "<p>No energy alert in this window" + (fault === "furnace_wear" ? "; wear shows up in machine health." : ".") + "</p>") +
+        }).join("") + "</ul>" : "<p>No energy alert in this window" + (fault === "furnace_wear" ? "; possible wear shows up in machine health." : ".") + "</p>") +
         '<p><a href="#' + where + '">See it on ' + esc(where) + "</a> · <a href=\"#plant\">plant</a> · <a href=\"#brief\">brief</a></p>";
       show();
     });

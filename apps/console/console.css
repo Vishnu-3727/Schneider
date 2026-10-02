@@ -560,8 +560,12 @@ html.static .screen.leaving { display: none; }
   background: var(--color-sheet); border: var(--border-thin) solid var(--color-rule);
   border-radius: var(--radius-hero); padding: var(--space-5) var(--space-6);
 }
-#screen-twin .tw-kpis { grid-template-columns: 1.6fr 1fr 1fr; gap: var(--space-8) var(--space-4); }
+#screen-twin .tw-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3) var(--space-4); }
 #screen-twin .tw-kpis .tw-big { font-size: 3.2rem; }
+#screen-twin .tw-kpis .unit { line-height: 1.3; }
+#screen-twin .twin-out .tw-bar { margin-top: var(--space-1); }
+#screen-twin .twin-out .tw-legend { margin: 0; }
+#screen-twin .twin-out .tw-compare { margin: var(--space-1) 0 0 0; font-size: 0.95rem; line-height: 1.35; }
 
 /* 5 Bill — hero-top: last-24h ₹ ribbon total (molten). */
 #screen-bill .ribbon-wrap {
