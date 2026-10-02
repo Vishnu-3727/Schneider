@@ -2285,13 +2285,23 @@
   window.addEventListener("hashchange", show);
 
   /* The stage is a fixed 16:9 canvas; scale it to fit the window so the
-   * browser shows exactly what the PPT slide shows. */
+   * browser shows exactly what the PPT slide shows. Narrow windows and
+   * portrait tablets use the flow layout instead (same query as
+   * console.css), so the stage is unscaled there. */
+  var FLOW_Q = "(max-width: 1100px), (orientation: portrait)";
   function fit() {
     var st = document.getElementById("stage");
+    if (window.matchMedia && window.matchMedia(FLOW_Q).matches) {
+      document.documentElement.style.setProperty("--scale", "1");
+      return;
+    }
     var s = Math.min(window.innerWidth / st.offsetWidth, window.innerHeight / st.offsetHeight);
     document.documentElement.style.setProperty("--scale", String(s));
   }
   window.addEventListener("resize", fit);
+  if (window.matchMedia && window.matchMedia(FLOW_Q).addEventListener) {
+    window.matchMedia(FLOW_Q).addEventListener("change", fit);
+  }
   fit();
 
   /* Arrow keys step through the loop like slides. */

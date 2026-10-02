@@ -52,6 +52,7 @@ h1, .screen-head h1, .hero-title, .hero-num, .pb-months {
   background: var(--color-paper);
   display: grid; grid-template-rows: auto minmax(0, 1fr);
   border: var(--border-thin) solid var(--color-rule);
+  overflow: clip;
 }
 
 /* ---- top bar: brand, the loop in three phases, fault button, colour key ---- */
@@ -343,7 +344,7 @@ html.static .d-flow { animation: none; }
 .pl-live b { color: var(--color-ink); font-size: 1.3rem; margin-right: var(--space-1); }
 .pl-live .good b { color: var(--color-verified); }
 .pl-live .bad b { color: var(--color-warn); }
-.pl-ctl { display: flex; gap: var(--space-4); align-items: center; font-size: 0.9rem; }
+.pl-ctl { display: flex; gap: var(--space-4); align-items: center; font-size: 0.9rem; flex-wrap: wrap; }
 .pl-ctl label { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; }
 .pl-ctl input[type=number] { width: 3.5rem; font: inherit; padding: 0.15rem var(--space-2); border: var(--border-thin) solid var(--color-ink-3); border-radius: 4px; background: var(--color-paper); color: var(--color-ink); }
 .pl-ctl input[type=range] { width: 8rem; accent-color: var(--color-projected); }
@@ -389,9 +390,9 @@ html.static .d-flow { animation: none; }
 
 /* ---- rupee ribbon (on Bill): the ribbon is the key element, taller ---- */
 .ribbon-wrap { padding: var(--space-4) var(--space-6); }
-.ribbon-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); }
+.ribbon-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-2) var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-3); }
 .ribbon-wrap h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
-.ribbon-key { margin: 0; font-size: var(--text-label); color: var(--color-ink-2); display: flex; align-items: center; gap: var(--space-1); }
+.ribbon-key { margin: 0; font-size: var(--text-label); color: var(--color-ink-2); display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); }
 .ribbon-key .k { width: 0.8rem; height: 0.8rem; border-radius: 2px; margin-left: var(--space-3); }
 .ribbon { display: flex; height: 5rem; border-radius: 4px; overflow: hidden; }
 .seg { flex-basis: 0; min-width: 1px; display: grid; place-items: center; font-size: var(--text-micro); font-weight: 700; color: var(--color-paper); border-right: 1px solid var(--color-paper); overflow: hidden; }
@@ -409,7 +410,8 @@ html.static .d-flow { animation: none; }
 
 /* ---- 7 scale (payback) ---- */
 #screen-payback .screen-body { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: var(--space-8); }
-#pb-inputs { overflow: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: var(--space-4) var(--space-6); }
+#pb-inputs { overflow: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: var(--space-3) var(--space-5); }
+#pb-inputs .note { font-size: var(--text-micro); line-height: 1.35; }
 .pb-fixed { grid-column: 1 / -1; padding-bottom: var(--space-2); border-bottom: var(--border-thin) solid var(--color-rule); }
 .pb-fixed .num { font-size: 1.6rem; font-weight: 800; color: var(--color-verified); }
 .pb-field { display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: var(--space-3); }
@@ -502,14 +504,15 @@ html.static .screen.leaving { display: none; }
   border-radius: var(--radius-hero);
   padding: var(--space-5) var(--space-6);
   display: flex; flex-direction: column; justify-content: center; gap: var(--space-1);
-  min-height: 0; min-width: 0; overflow: hidden;
+  min-height: 0; min-width: 0; overflow: visible;
 }
 .c-hero .c-label { font-size: 0.875rem; font-weight: 500; color: var(--color-ink-2); }
 .c-hero .c-num {
   font-family: var(--font-numerals);
   font-variant-numeric: tabular-nums; font-weight: 900;
-  font-size: var(--text-hero); line-height: 0.95; letter-spacing: -0.02em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--text-hero); line-height: 1.05; letter-spacing: -0.02em;
+  padding-block: 0.06em;
+  white-space: nowrap; overflow: visible;
 }
 .c-hero .c-sub { font-size: var(--text-label); color: var(--color-ink-2); }
 .c-hero[data-prov=measured] .c-num { color: var(--color-accent); }
@@ -567,6 +570,23 @@ html.static .screen.leaving { display: none; }
 }
 #screen-bill .ribbon-sum .num { font-size: 3.5rem; font-weight: 900; line-height: 1; }
 #screen-bill .bill-grid { grid-template-columns: 1.5fr 1fr 0.9fr; gap: var(--space-4); }
+/* Bill must fit the 900 px stage without an inner scrollbar in the Carbon
+ * panel: compact ribbon gives the grid more height, carbon content tightened. */
+#screen-bill.screen { padding-bottom: var(--space-4); }
+#screen-bill .screen-body { gap: var(--space-3); }
+#screen-bill .ribbon-wrap { padding: var(--space-3) var(--space-5); }
+#screen-bill .ribbon-head { margin-bottom: var(--space-2); }
+#screen-bill .ribbon { height: 4.25rem; }
+#screen-bill .ribbon-sum { margin: 0; }
+#screen-bill .ribbon-sum .num { font-size: 3rem; }
+#screen-bill .bill-grid .panel h2 { margin-bottom: var(--space-2); }
+#screen-bill .bill-grid p, #screen-bill .bill-grid .bill-list { font-size: 0.875rem; }
+#screen-bill .bill-grid p { margin-top: var(--space-2); }
+#screen-bill #bill-carbon .kpi { font-size: 1.9rem; }
+#screen-bill .cbam-sheet { margin-top: var(--space-2); padding-top: var(--space-2); }
+#screen-bill .cbam-sheet p { font-size: 0.875rem; }
+#screen-bill .cbam-row { gap: var(--space-2); margin-top: var(--space-2); }
+#screen-bill #carbon-csv { margin-top: var(--space-2); }
 
 /* 6 Health — compact top band: lowest health score (neutral ink; bars keep own state). */
 #screen-health .screen-body { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--space-4); }
@@ -601,9 +621,14 @@ html.static .screen.leaving { display: none; }
 #screen-act #act-cols { grid-column: 1 / -1; grid-row: 2; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-4); }
 
 /* 10 Prove — hero-top: verified kWh + stamp (green). */
-#screen-impact .screen-body { gap: var(--space-8) var(--space-4); }
-#screen-impact .impact-hero { border-radius: var(--radius-hero); gap: var(--space-4) var(--space-8); }
-#screen-impact .hero-num { font-size: var(--text-hero); font-weight: 900; }
+#screen-impact .screen-body { gap: var(--space-4); }
+#screen-impact .impact-hero { border-radius: var(--radius-hero); padding: var(--space-3) var(--space-5); gap: var(--space-2) var(--space-6); }
+#screen-impact .hero-num { font-size: 4.5rem; font-weight: 900; line-height: 0.95; }
+#screen-impact .hero-left { gap: var(--space-1); }
+#screen-impact .hero-claim { font-size: 1.05rem; }
+#screen-impact .hero-right { gap: var(--space-2); }
+#screen-impact .hero-kv .num { font-size: 1.9rem; }
+#screen-impact .impact-hero .note { font-size: var(--text-micro); line-height: 1.35; margin: 0; }
 #screen-impact .impact-cards { grid-template-columns: 1.5fr 1fr 1fr; gap: var(--space-4); }
 #screen-impact .impact-lower { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: var(--space-4); }
 
@@ -613,8 +638,8 @@ html.static .screen.leaving { display: none; }
 #screen-payback .pb-months { font-size: var(--text-hero); }
 #screen-payback .pb-fixed .num { font-family: var(--font-numerals); font-weight: 800; }
 
-/* Phones (<=760px): one column, hero first, smaller numerals. */
-@media (max-width: 760px) {
+/* Narrow windows and portrait tablets: one column, hero first, smaller numerals. */
+@media (max-width: 1100px), (orientation: portrait) {
   #screen-plant .screen-body,
   #screen-detect .screen-body,
   #screen-health .screen-body,
@@ -643,11 +668,11 @@ html.static .screen.leaving { display: none; }
   #screen-payback .pb-months,
   #screen-heats .heats-sum .kpi-card:nth-child(2) .kpi { font-size: 3rem; }
 }
-/* Phones: no scaled stage; the screens flow and scroll. */
-@media (max-width: 760px) {
+/* Narrow windows and portrait tablets: no scaled stage; the screens flow and scroll. */
+@media (max-width: 1100px), (orientation: portrait) {
   body { overflow: auto; }
   .viewport { position: static; display: block; }
-  .stage { position: static; width: auto; height: auto; transform: none; display: block; }
+  .stage { position: static; width: auto; height: auto; transform: none; display: block; overflow: visible; }
   .stage.touring { position: relative; }
   .topbar { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); }
   .screen, .screen-head > div, .screen-body > * { min-width: 0; max-width: 100%; }
@@ -667,6 +692,28 @@ html.static .screen.leaving { display: none; }
   .attn, .impact-hero { flex-direction: column; align-items: flex-start; }
   .hero-right { padding-left: 0; border-left: 0; }
   .chart { min-height: 18rem; flex: none; }
+  .twin-stage { min-height: 20rem; flex: none; }
+  /* Flow shows whole screens with page scroll: drop every fixed height and
+   * inner scroll context (the Heats table and plant diagram keep their own
+   * scroll boxes; the trail drawer is an overlay). */
+  .screens { overflow: visible; }
+  .screen, .screen.active { height: auto; min-height: 0; overflow: visible; }
+  .screen.leaving { display: none; }
+  .screen-body { height: auto; overflow: visible; }
+  .panel, #detect-alerts-list, #health-list, #insights-list,
+  #screen-act #act-cols .panel, #screen-impact .impact-lower .panel,
+  #screen-bill .bill-grid .panel, #pb-inputs, .twin-side, .msg, .rank { overflow: visible; }
+  /* Closed drawers are fixed overlays so they never widen the page. */
+  .trail { position: fixed; top: 0; right: 0; bottom: 0; width: min(34rem, 94vw); max-width: 94vw; transform: translateX(103%); }
+  .trail.open { transform: none; }
+  /* Scale sliders stack in one column; CBAM fields stack too. */
+  #pb-inputs { grid-template-columns: minmax(0, 1fr); }
+  .cbam-row { grid-template-columns: minmax(0, 1fr); }
+  /* Planner board fits narrow widths. */
+  .pl-board { padding-left: 6rem; }
+  .pl-bands { left: 6rem; }
+  .pl-axis { left: 6rem; }
+  .pl-name { left: -6rem; width: 5.5rem; font-size: 0.9rem; }
 }
 
 /* ---- CBAM data sheet (on Bill) ---- */
@@ -693,3 +740,67 @@ html.static .screen.leaving { display: none; }
 .tour-btns { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .tour-btns .btn { margin: 0; }
 .stage.touring .keys { display: none; }
+
+/* ---- round 2 responsive audit fixes (desktop fit + flow scroll) ---- */
+/* 2. Prove desktop: the saving % stays big (>= 6.5rem); the ADEETIE note
+ * moves into the wide empty middle beside the number block, so the hero is
+ * no taller than before (note leaves the left column's vertical stack and
+ * padding is tightened to cover the bigger numeral). */
+#screen-impact .impact-hero { padding: var(--space-2) var(--space-5); }
+#screen-impact .hero-num { font-size: 6.5rem; line-height: 0.9; white-space: nowrap; }
+#screen-impact .hero-left:has(> .note) { display: grid; grid-template-columns: auto minmax(12rem, 19rem); column-gap: var(--space-6); row-gap: var(--space-1); align-items: center; }
+#screen-impact .hero-left:has(> .note) > .stamp { grid-column: 1; grid-row: 1; justify-self: start; }
+#screen-impact .hero-left:has(> .note) > .hero-num { grid-column: 1; grid-row: 2; }
+#screen-impact .hero-left:has(> .note) > .hero-claim { grid-column: 1; grid-row: 3; }
+#screen-impact .hero-left:has(> .note) > .note { grid-column: 2; grid-row: 1 / span 3; align-self: center; max-width: 19rem; }
+
+/* 3. Scale desktop: #pb-out fits inside the stage with its last line clear
+ * of the bottom hint (tighter gaps/padding, smaller months + rows). */
+#screen-payback #pb-out { gap: var(--space-2); padding: var(--space-4) var(--space-6); min-height: 0; }
+#screen-payback .pb-hero { gap: var(--space-3); }
+#screen-payback .pb-months { font-size: 5.5rem; line-height: 0.9; }
+#screen-payback .pb-ruler { margin-bottom: var(--space-3); }
+#screen-payback .pb-line { font-size: 1rem; }
+#screen-payback .pb-esco { padding: var(--space-2) var(--space-4); }
+#screen-payback .pb-scale th { padding: var(--space-1) 0; }
+#screen-payback .pb-scale td { padding: var(--space-1) 0; font-size: 1rem; }
+#screen-payback #pb-out .note { font-size: var(--text-micro); line-height: 1.35; }
+
+/* 4. Scale desktop 3-column grid: value on its own line under the label,
+ * left-aligned, so long labels need at most 2 lines. */
+#screen-payback #pb-inputs .pb-field { grid-template-columns: minmax(0, 1fr); }
+#screen-payback #pb-inputs .pb-field .pb-name { grid-column: 1; }
+#screen-payback #pb-inputs .pb-field output { grid-column: 1; justify-self: start; text-align: left; }
+
+/* 5. Bill desktop: trim ~15-20px of spacing so Carbon in every tonne fits
+ * with no inner scrollbar. */
+#screen-bill .bill-grid .panel h2 { margin-bottom: var(--space-1); }
+#screen-bill .bill-grid p { margin-top: var(--space-1); }
+#screen-bill .bill-grid .bill-list { margin-top: var(--space-1); }
+#screen-bill .cbam-sheet { margin-top: var(--space-1); padding-top: var(--space-1); }
+#screen-bill .cbam-sheet p { margin-top: var(--space-1); }
+#screen-bill .cbam-row { margin-top: var(--space-1); }
+#screen-bill #carbon-csv { margin-top: var(--space-1); }
+
+/* 6. Act desktop: recommendation panel fits with no inner scrollbar
+ * (tighter stepper gives #act-cols more height; tighter rec spacing and
+ * smaller secondary text; nothing below --text-micro). */
+#screen-act .screen-body { gap: var(--space-4) var(--space-4); }
+#screen-act .step { padding-top: var(--space-4); font-size: var(--text-label); }
+#screen-act #act-cols .panel.sheet { padding: var(--space-4) var(--space-5); }
+#screen-act .rec-card h3 { font-size: 1.2rem; }
+#screen-act .rec-card p { margin: var(--space-1) 0; font-size: 0.9rem; line-height: 1.35; }
+#screen-act #act-rec > h3[style] { margin-top: var(--space-2) !important; }
+#screen-act .pend-list li { padding: var(--space-1) 0; font-size: 0.9rem; }
+#screen-act #act-rec .note { font-size: var(--text-micro); line-height: 1.35; }
+#screen-act .audit-list li { padding: var(--space-1) 0; font-size: 0.85rem; }
+
+/* Flow layout: plant diagram scrolls inside its own box; desktop-only
+ * numeral sizes are reset to the small flow sizes. */
+@media (max-width: 1100px), (orientation: portrait) {
+  .plant-wrap #plant-tiles { overflow: hidden; overflow-x: auto; }
+  #screen-impact .hero-left:has(> .note) { display: flex; flex-direction: column; align-items: flex-start; }
+  #screen-impact .hero-left:has(> .note) > .note { max-width: none; }
+  #screen-impact .hero-num { font-size: 3rem; }
+  #screen-payback .pb-months { font-size: 3rem; }
+}
