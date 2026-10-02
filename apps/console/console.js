@@ -2445,10 +2445,14 @@
       '<span class="cover-badges">' + badge("VERIFIED", "verified") + " " + badge("SIMULATED data") + "</span>";
   }
 
-  /* Cover background: molten furnace surface seen from slightly above,
-   * placed right of centre, static camera. One WebGL context, created once
-   * and reused; the rAF loop runs only while the cover is the active
-   * screen and the page is visible. Reduced motion renders one still. */
+  /* Cover background: a cinematic induction furnace standing right of the
+   * cover copy, seen from slightly above so the melt glows inside the
+   * crucible. Proportions follow buildTwin3d (shell, lining, rim torus,
+   * copper helix, melt, tilt posts) but this is a separate, richer model
+   * with its own lighting, coil energy pulse and spark bursts. One WebGL
+   * context, created once and reused; the rAF loop runs only while the
+   * cover is the active screen and the page is visible. Reduced motion
+   * renders one still. */
   var coverBg = null, coverBuilt = false, coverRaf = null;
   var coverCssCanvas = null;
   function coverCss(name) {
@@ -2481,35 +2485,108 @@
     if (section) section.classList.add("cover-flat");
     coverBg = null;
   }
-  function coverBuild() {
-    if (coverBuilt) return coverBg;
-    coverBuilt = true;
-    var canvas = document.getElementById("cover-bg");
-    if (!canvas || !window.THREE) { coverFlat(); return null; }
-    var renderer;
-    try {
-      renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false, alpha: false });
-    } catch (e) { coverFlat(); return null; }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-    var scene = new THREE.Scene();
-    renderer.setClearColor(new THREE.Color(coverCss("--color-paper")));
-    var cam = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    /* Crucible centred at ~74% width / 56% height on desktop (right of the
-     * ~48% text panel), centred with a small margin on narrow canvases.
-     * Unit group has outer radius 1: melt 0.94, rim ring 0.96 + tube 0.04
-     * (thin dark band ~8% of outer radius), scaled in coverResize so the
-     * outer diameter is ~62% of the cover height and fully on-screen. */
-    if (cam.clearViewOffset) cam.clearViewOffset();
-    var discX = 0, discZ = 0, curRo = 1.7;
-    var CAM_H = 4.2, CAM_D = 5.2;
-    cam.position.set(discX, CAM_H, discZ + CAM_D);
-    cam.lookAt(discX, 0, discZ);
-    var accent = new THREE.Color(coverCss("--color-accent"));
-    var hot = new THREE.Color(coverCss("--color-melt-hot"));
-    var crust = new THREE.Color(coverCss("--color-paper"));
-    var sheet = new THREE.Color(coverCss("--color-sheet"));
-    var surfMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uCrust: { value: crust }, uAccent: { value: accent }, uHot: { value: hot } },
+  /* A recognisable induction furnace for the cover: steel shell with a
+   * dark refractory lining, steel rim torus, base platform on two tilt
+   * posts, a copper helix coil (one tube per turn so an energy band can
+   * travel up it), a glowing molten surface just below the rim, a dark
+   * floor that catches a warm pool of light, and burst-driven sparks.
+   * Local units mirror buildTwin3d; the caller scales the group. */
+  /* Cover helpers: small radial CanvasTextures (no external assets).
+   * coverDotTex: soft round white->transparent sprite for sparks/glow.
+   * coverFadeTex: radial white-centre -> black-edge falloff for the floor alphaMap. */
+  var _coverDotTex = null, _coverFadeTex = null;
+  function coverDotTex() {
+    if (_coverDotTex) return _coverDotTex;
+    var c = document.createElement("canvas");
+    c.width = 64; c.height = 64;
+    var x = c.getContext("2d");
+    var grd = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grd.addColorStop(0, "rgba(255,255,255,1)");
+    grd.addColorStop(0.35, "rgba(255,255,255,0.9)");
+    grd.addColorStop(0.6, "rgba(255,255,255,0.25)");
+    grd.addColorStop(1, "rgba(255,255,255,0)");
+    x.fillStyle = grd;
+    x.fillRect(0, 0, 64, 64);
+    _coverDotTex = new THREE.CanvasTexture(c);
+    return _coverDotTex;
+  }
+  function coverFadeTex() {
+    if (_coverFadeTex) return _coverFadeTex;
+    var c = document.createElement("canvas");
+    c.width = 256; c.height = 256;
+    var x = c.getContext("2d");
+    var grd = x.createRadialGradient(128, 128, 0, 128, 128, 128);
+    grd.addColorStop(0, "#ffffff");
+    grd.addColorStop(0.45, "#8a8a8a");
+    grd.addColorStop(0.75, "#222222");
+    grd.addColorStop(1, "#000000");
+    x.fillStyle = grd;
+    x.fillRect(0, 0, 256, 256);
+    _coverFadeTex = new THREE.CanvasTexture(c);
+    return _coverFadeTex;
+  }
+  function coverFurnace(scene, T) {
+    var g = new THREE.Group();
+    scene.add(g);
+    var steel = new THREE.MeshStandardMaterial({ color: 0x4b5563, metalness: 0.6, roughness: 0.45 });
+    /* Platform and tilt posts: platform is dark steel/concrete near
+     * --color-sheet (T.sheet) so it catches only the warm glow near the
+     * furnace and stays dark at its edges. */
+    var base = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.2, 3.0),
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(T.sheet || "#232a35"), roughness: 0.9, metalness: 0.2 }));
+    base.position.y = 0.1;
+    g.add(base);
+    [-1.25, 1.25].forEach(function (x) {
+      var post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.6, 0.35), steel);
+      post.position.set(x, 1.0, 0);
+      g.add(post);
+    });
+    /* Refractory crucible: open steel shell, dark lined interior. */
+    var shell = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1.6, 40, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x6b7280, metalness: 0.3, roughness: 0.6, side: THREE.DoubleSide }));
+    shell.position.y = 1.2;
+    g.add(shell);
+    /* Dark refractory lining (near --color-sheet, T.sheet): only the melt
+     * glow lights it, so it never reads as a light cooking pot. */
+    var lining = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.7, 1.55, 40, 1, true),
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(T.sheet || "#232a35"), roughness: 1, metalness: 0, side: THREE.BackSide }));
+    lining.position.y = 1.22;
+    g.add(lining);
+    var rim = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.12, 12, 56), steel);
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = 2.0;
+    g.add(rim);
+    /* Copper induction coil: 8 turns, one TubeGeometry per turn so each
+     * turn gets its own material for the travelling energy band.
+     * 8 x 48 tubular segments = 384, within budget. */
+    var TURNS = 8, COIL_R = 1.07, COIL_Y0 = 0.5, COIL_H = 1.3;
+    var coilMats = [];
+    for (var k = 0; k < TURNS; k++) {
+      var pts = [], SEG = 40, i, a;
+      for (i = 0; i <= SEG; i++) {
+        a = (i / SEG) * Math.PI * 2;
+        pts.push(new THREE.Vector3(Math.cos(a) * COIL_R,
+          COIL_Y0 + (k + i / SEG) * COIL_H / TURNS, Math.sin(a) * COIL_R));
+      }
+      /* Un-pulsed copper runs darker and warmer so the travelling pulse
+       * band contrasts more; the pulse emissive is added per-turn below. */
+      var cm = new THREE.MeshStandardMaterial({
+        color: 0x7c3f16, metalness: 0.85, roughness: 0.35, emissive: 0x000000
+      });
+      g.add(new THREE.Mesh(
+        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.06, 8, false), cm));
+      coilMats.push(cm);
+    }
+    /* Molten metal just below the rim: the existing molten noise shader
+     * (dark crust -> accent -> hot), brighter so the melt glows, with a
+     * brightened centre faking induction stirring. */
+    var meltMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uCrust: { value: new THREE.Color(T.crust) },
+        uAccent: { value: new THREE.Color(T.accent) },
+        uHot: { value: new THREE.Color(T.hot) }
+      },
       vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
       fragmentShader: [
         "varying vec2 vUv;",
@@ -2519,52 +2596,191 @@
         "  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }",
         "float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += a * vnoise(p); p *= 2.03; a *= 0.5; } return v; }",
         "void main() {",
-        "  float n = fbm(vUv * 5.0 + vec2(uTime * 0.04, uTime * 0.015));",
+        "  float n = fbm(vUv * 5.0 + vec2(uTime * 0.05, uTime * 0.02));",
         "  float r = length(vUv - 0.5) * 2.0;",
-        "  float edge = smoothstep(1.0, 0.72, r);",
-        "  vec3 col = mix(uCrust, uAccent, smoothstep(0.42, 0.62, n));",
-        "  col = mix(col, uHot, smoothstep(0.68, 0.73, n));",
-        "  float fl = 1.0 + 0.08 * sin(uTime * 0.9);",
-        "  gl_FragColor = vec4(col * fl * edge, 1.0);",
+        "  float edge = smoothstep(1.0, 0.85, r);",
+        "  vec3 col = mix(uCrust * 0.22, uAccent * 1.4, smoothstep(0.30, 0.55, n));",
+        "  col = mix(col, uHot * 2.4, smoothstep(0.55, 0.70, n));",
+        "  float stir = smoothstep(0.9, 0.0, r);",
+        "  col += uHot * stir * (0.55 + 0.35 * n);",
+        "  float fl = 1.0 + 0.10 * sin(uTime * 1.1) + 0.05 * sin(uTime * 2.7 + 1.3);",
+        "  gl_FragColor = vec4(col * fl * 2.0 * edge, 1.0);",
         "}"
       ].join("\n")
     });
-    var cruc = new THREE.Group();
-    cruc.position.set(discX, 0, discZ);
-    cruc.scale.set(curRo, curRo, curRo);
-    scene.add(cruc);
-    var surf = new THREE.Mesh(new THREE.CircleGeometry(0.94, 64), surfMat);
-    surf.rotation.x = -Math.PI / 2;
-    cruc.add(surf);
-    var rim = new THREE.Mesh(new THREE.TorusGeometry(0.96, 0.04, 14, 96),
-      new THREE.MeshBasicMaterial({ color: sheet }));
-    rim.rotation.x = Math.PI / 2;
-    rim.position.y = 0.02;
-    cruc.add(rim);
-    var lip = new THREE.Mesh(new THREE.TorusGeometry(0.915, 0.012, 8, 96),
-      new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.35 }));
-    lip.rotation.x = Math.PI / 2;
-    lip.position.y = 0.021;
-    cruc.add(lip);
-    var N = 48, pos = new Float32Array(N * 3), col = new Float32Array(N * 3), spd = new Float32Array(N);
-    function sparkPlace(i, anywhere) {
-      var a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * 0.80 * curRo;
-      pos[i * 3] = discX + Math.cos(a) * rr;
-      pos[i * 3 + 1] = anywhere ? Math.random() * 2.6 : Math.random() * 0.3;
-      pos[i * 3 + 2] = discZ + Math.sin(a) * rr;
-      spd[i] = 0.25 + Math.random() * 0.45;
+    /* Melt surface raised to just below the rim, filling the inner
+     * diameter so it is clearly the brightest thing in the scene. */
+    var melt = new THREE.Mesh(new THREE.CircleGeometry(0.77, 48), meltMat);
+    melt.rotation.x = -Math.PI / 2;
+    melt.position.y = 1.88;
+    g.add(melt);
+    /* Soft additive halo just above the mouth so light visibly spills out. */
+    var halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: coverDotTex(),
+      color: new THREE.Color(T.accent), transparent: true, opacity: 0.38,
+      blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.position.set(0, 2.18, 0);
+    halo.scale.set(2.6, 1.1, 1);
+    g.add(halo);
+    /* Dark floor in the --color-paper tone with a radial alpha falloff, so
+     * there is no visible edge; only a soft warm pool near the base reads. */
+    var floor = new THREE.Mesh(new THREE.CircleGeometry(9, 48),
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(T.crust), roughness: 1, metalness: 0,
+        transparent: true, alphaMap: coverFadeTex() }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.01;
+    g.add(floor);
+    /* Lighting: warm flicker just above the melt, dim cool rim from
+     * behind-left for silhouette, very dim hemisphere fill. */
+    var meltLight = new THREE.PointLight(new THREE.Color(T.accent), 2, 12);
+    meltLight.position.set(0, 2.5, 0);
+    g.add(meltLight);
+    /* Soft warm pool of light hugging the furnace base. */
+    var baseGlow = new THREE.PointLight(new THREE.Color(T.accent), 0.9, 7);
+    baseGlow.position.set(0, 0.7, 0);
+    g.add(baseGlow);
+    var rimLight = new THREE.DirectionalLight(new THREE.Color(T.cool), 0.6);
+    rimLight.position.set(-4, 3.5, -4.5);
+    g.add(rimLight);
+    g.add(new THREE.HemisphereLight(0x9aa3b5, 0x1a1d24, 0.25));
+    /* Sparks: 80 points launched from the melt, arcing out under gravity.
+     * Bursts every 2-4 s plus a few stragglers; dead sparks park below.
+     * Round soft sprites (radial dot as map) in two slightly different
+     * sizes; hot yellow at birth cooling to orange. */
+    var accentC = new THREE.Color(T.accent), hotC = new THREE.Color(T.hot);
+    var sparkTex = coverDotTex();
+    var tmpC = new THREE.Color(), emberC = new THREE.Color();
+    function makeSparkCloud(n, size) {
+      var pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+      var vel = new Float32Array(n * 3), baseCol = new Float32Array(n * 3);
+      var age = new Float32Array(n), life = new Float32Array(n);
+      var sg = new THREE.BufferGeometry();
+      sg.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      sg.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      var pts = new THREE.Points(sg, new THREE.PointsMaterial({ size: size, map: sparkTex,
+        vertexColors: true, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, sizeAttenuation: true }));
+      pts.frustumCulled = false;
+      g.add(pts);
+      return { n: n, pos: pos, col: col, vel: vel, baseCol: baseCol,
+        age: age, life: life, sg: sg, cursor: 0 };
     }
-    for (var i = 0; i < N; i++) sparkPlace(i, true);
-    var sg = new THREE.BufferGeometry();
-    sg.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    sg.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    var sparks = new THREE.Points(sg, new THREE.PointsMaterial({ size: 0.07, vertexColors: true,
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-    scene.add(sparks);
-    coverBg = { renderer: renderer, scene: scene, cam: cam, surfMat: surfMat,
-      sg: sg, pos: pos, col: col, spd: spd, accent: accent, n: N, t: 0, place: sparkPlace,
-      cruc: cruc, discX: discX, discZ: discZ, camH: CAM_H, camD: CAM_D,
-      getRo: function () { return curRo; }, setRo: function (r) { curRo = r; } };
+    var sparkParts = [makeSparkCloud(52, 0.06), makeSparkCloud(28, 0.105)];
+    function launchAt(p, s, midFlight) {
+      var a0 = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * 0.6;
+      var x0 = Math.cos(a0) * rr, z0 = Math.sin(a0) * rr;
+      var up = 2.0 + Math.random() * 1.4, out = 0.3 + Math.random() * 0.7;
+      var L = 1.1 + Math.random() * 0.9, startAge = 0;
+      if (midFlight) startAge = Math.random() * L * 0.8;
+      /* Closed-form ballistic position so seeded sparks start mid-air. */
+      var G = 3.0;
+      p.pos[s * 3] = x0 + Math.cos(a0) * out * startAge;
+      p.pos[s * 3 + 1] = 1.93 + up * startAge - 0.5 * G * startAge * startAge;
+      p.pos[s * 3 + 2] = z0 + Math.sin(a0) * out * startAge;
+      p.vel[s * 3] = Math.cos(a0) * out;
+      p.vel[s * 3 + 1] = up - G * startAge;
+      p.vel[s * 3 + 2] = Math.sin(a0) * out;
+      p.age[s] = startAge;
+      p.life[s] = L;
+      /* Hot yellow at birth: mostly hot with a touch of accent, bright. */
+      tmpC.copy(hotC).lerp(accentC, Math.random() * 0.25).multiplyScalar(1.8);
+      p.baseCol[s * 3] = tmpC.r;
+      p.baseCol[s * 3 + 1] = tmpC.g;
+      p.baseCol[s * 3 + 2] = tmpC.b;
+    }
+    function burst(n, midFlight) {
+      for (var j = 0; j < n; j++) {
+        var p = sparkParts[j % sparkParts.length];
+        launchAt(p, p.cursor, midFlight);
+        p.cursor = (p.cursor + 1) % p.n;
+      }
+    }
+    sparkParts.forEach(function (p) {
+      for (i = 0; i < p.n; i++) { p.pos[i * 3 + 1] = -50; p.life[i] = 1; p.age[i] = 2; }
+    });
+    burst(30, true);
+    return { group: g, coilMats: coilMats, meltMat: meltMat, meltLight: meltLight,
+      sparkParts: sparkParts, accentC: accentC,
+      burst: burst, nextBurst: 2.5 };
+  }
+  /* One spark step: burst timer, stragglers, gravity, fade, respawn.
+   * Colour cools from hot yellow (birth) to dim orange (death). */
+  function coverSparks(b, dt) {
+    b.nextBurst -= dt;
+    if (b.nextBurst <= 0) {
+      b.burst(25 + Math.floor(Math.random() * 15), false);
+      b.nextBurst = 2 + Math.random() * 2;
+    } else if (Math.random() < 2.2 * dt) {
+      b.burst(1, false);
+    }
+    var G = 3.0;
+    var ember = new THREE.Color();
+    for (var pi = 0; pi < b.sparkParts.length; pi++) {
+      var P = b.sparkParts[pi];
+      for (var s = 0; s < P.life.length; s++) {
+        if (P.age[s] >= P.life[s]) {
+          if (P.pos[s * 3 + 1] > -49) {
+            P.pos[s * 3 + 1] = -50;
+            P.col[s * 3] = 0; P.col[s * 3 + 1] = 0; P.col[s * 3 + 2] = 0;
+          }
+          continue;
+        }
+        if (dt > 0) {
+          P.age[s] += dt;
+          if (P.age[s] >= P.life[s]) {
+            P.pos[s * 3 + 1] = -50;
+            P.col[s * 3] = 0; P.col[s * 3 + 1] = 0; P.col[s * 3 + 2] = 0;
+            continue;
+          }
+          P.vel[s * 3 + 1] -= G * dt;
+          P.pos[s * 3] += P.vel[s * 3] * dt;
+          P.pos[s * 3 + 1] += P.vel[s * 3 + 1] * dt;
+          P.pos[s * 3 + 2] += P.vel[s * 3 + 2] * dt;
+        }
+      /* Colours resolve even on a zero-dt still frame, so the seeded
+       * mid-flight sparks show under reduced motion. */
+      var f = 1 - P.age[s] / P.life[s];
+      ember.copy(b.accentC).multiplyScalar(0.55);
+      P.col[s * 3] = ember.r + (P.baseCol[s * 3] - ember.r) * f;
+      P.col[s * 3 + 1] = ember.g + (P.baseCol[s * 3 + 1] - ember.g) * f;
+      P.col[s * 3 + 2] = ember.b + (P.baseCol[s * 3 + 2] - ember.b) * f;
+      }
+      P.sg.attributes.position.needsUpdate = true;
+      P.sg.attributes.color.needsUpdate = true;
+    }
+  }
+  function coverBuild() {
+    if (coverBuilt) return coverBg;
+    coverBuilt = true;
+    var canvas = document.getElementById("cover-bg");
+    if (!canvas || !window.THREE) { coverFlat(); return null; }
+    var renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: false });
+    } catch (e) { coverFlat(); return null; }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    /* Old three.js on this page uses outputEncoding, not outputColorSpace. */
+    if ("sRGBEncoding" in THREE) renderer.outputEncoding = THREE.sRGBEncoding;
+    var scene = new THREE.Scene();
+    scene.background = new THREE.Color(coverCss("--color-paper"));
+    var T = { accent: coverCss("--color-accent"), hot: coverCss("--color-melt-hot"),
+      cool: coverCss("--color-projected"), crust: coverCss("--color-paper"),
+      sheet: coverCss("--color-sheet") };
+    var F = coverFurnace(scene, T);
+    var cam = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    /* Camera sits ~38 degrees above the rim so the melt reads inside the
+     * crucible. coverResize aims the furnace at ~72% width on desktop
+     * (right of the ~48% text panel), centred in flow layout. */
+    var CAM_H = 3.9, CAM_D = 5.0;
+    if (cam.clearViewOffset) cam.clearViewOffset();
+    coverBg = { renderer: renderer, scene: scene, cam: cam, group: F.group,
+      coilMats: F.coilMats, meltMat: F.meltMat, meltLight: F.meltLight,
+      meltBase: 2, sparkParts: F.sparkParts, accentC: F.accentC, burst: F.burst,
+      nextBurst: F.nextBurst, t: 0.75,
+      camH: CAM_H, camD: CAM_D, discX: 0, discZ: 0,
+      tgt: new THREE.Vector3(), off: new THREE.Vector3(),
+      setRo: function (r) { this.group.scale.set(r, r, r); } };
     coverResize();
     return coverBg;
   }
@@ -2575,7 +2791,14 @@
     var w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
     coverBg.renderer.setSize(w, h, false);
     var narrow = w < 600 || (w / h) < 0.9;
-    var u = narrow ? 0.5 : 0.74, v = narrow ? 0.5 : 0.56;
+    /* Furnace + platform + spark plume fit in ~60% of the cover height
+     * on desktop, centred at ~72% width / ~55% height (right of the text
+     * panel, dark space left below the platform); narrow centres it with
+     * the camera pulled back so furnace, platform and sparks take ~75%
+     * of the canvas block height, platform fully inside with a dark
+     * margin below. Coil diameter is 2.14 (COIL_R 1.07); the 3.0 platform
+     * is about 1.4-1.6x that, smaller and thinner than before. */
+    var u = narrow ? 0.5 : 0.72, v = narrow ? 0.55 : 0.50;
     var dist = Math.sqrt(coverBg.camH * coverBg.camH + coverBg.camD * coverBg.camD);
     var halfH = dist * Math.tan(coverBg.cam.fov * Math.PI / 360);
     var H = halfH * 2;
@@ -2583,33 +2806,48 @@
     if (coverBg.cam.clearViewOffset) coverBg.cam.clearViewOffset();
     coverBg.cam.updateProjectionMatrix();
     var W = H * coverBg.cam.aspect;
-    var Ro = Math.min(0.31 * H, narrow ? 0.43 * W : 0.31 * H);
+    /* Local units: platform half-diagonal 2.12, sparks peak ~3.7.
+     * Desktop fits spark-peak-to-near-corner (3.7 + 2.12) in 76% of the
+     * cover height (12%-88%) and the whole platform width (2*2.12*Ro)
+     * in 43% of the width (52%-95%); Ro takes the tighter bound so
+     * both hold and the platform never touches the canvas edge;
+     * narrow canvases centre it at ~75% height with side margins. */
+    var Ro = narrow
+      ? Math.min(0.75 * H / 3.9, 0.30 * W)
+      : Math.min(0.76 * H / (3.7 + 2.12), 0.43 * W / (2 * 2.12));
     coverBg.setRo(Ro);
-    coverBg.cruc.scale.set(Ro, Ro, Ro);
     var ndcX = u * 2 - 1, ndcY = 1 - 2 * v;
     var sinPhi = coverBg.camH / dist;
     var dx = ndcX * (W / 2);
     var dz = -ndcY * (H / 2) / sinPhi;
-    coverBg.cam.position.set(coverBg.discX, coverBg.camH, coverBg.discZ + coverBg.camD);
-    coverBg.cam.lookAt(coverBg.discX - dx, 0, coverBg.discZ - dz);
+    coverBg.tgt.set(coverBg.discX - dx, 0, coverBg.discZ - dz);
+    coverBg.off.set(coverBg.discX - coverBg.tgt.x, coverBg.camH,
+      coverBg.discZ + coverBg.camD - coverBg.tgt.z);
+    coverBg.cam.position.copy(coverBg.tgt).add(coverBg.off);
+    coverBg.cam.lookAt(coverBg.tgt);
   }
   function coverFrame(dt) {
     var b = coverBg;
     if (!b) return;
     b.t += dt;
-    b.surfMat.uniforms.uTime.value = b.t;
-    var i, y, k;
-    for (i = 0; i < b.n; i++) {
-      y = b.pos[i * 3 + 1] + b.spd[i] * dt;
-      if (y > 2.6) { b.place(i, false); y = b.pos[i * 3 + 1]; }
-      else { b.pos[i * 3 + 1] = y; }
-      k = Math.max(0, 1 - y / 2.6);
-      b.col[i * 3] = b.accent.r * k;
-      b.col[i * 3 + 1] = b.accent.g * k;
-      b.col[i * 3 + 2] = b.accent.b * k;
+    var t = b.t, i, d, e;
+    /* Molten surface drifts slowly; the warm light breathes +/-10% on two
+     * summed sines and lights the rim interior, top coil and floor. */
+    b.meltMat.uniforms.uTime.value = t;
+    b.meltLight.intensity = b.meltBase * (1 + 0.06 * Math.sin(t * 5.7) + 0.04 * Math.sin(t * 13.3 + 1.7));
+    /* Energy band travels bottom -> top, one sweep per ~1.5 s. */
+    var ph = ((t % 1.5) / 1.5) * (b.coilMats.length + 1) - 0.5;
+    for (i = 0; i < b.coilMats.length; i++) {
+      d = i - ph;
+      e = 0.10 + 1.15 * Math.exp(-d * d / 0.6);
+      b.coilMats[i].emissive.setRGB(0.75 * e, 0.28 * e, 0.05 * e);
     }
-    b.sg.attributes.position.needsUpdate = true;
-    b.sg.attributes.color.needsUpdate = true;
+    /* Calm camera drift: +/-8 degrees azimuth over ~20 s, no controls. */
+    var az = (8 * Math.PI / 180) * Math.sin(t * 2 * Math.PI / 20);
+    var c = Math.cos(az), s = Math.sin(az), ox = b.off.x, oz = b.off.z;
+    b.cam.position.set(b.tgt.x + ox * c + oz * s, b.tgt.y + b.off.y, b.tgt.z - ox * s + oz * c);
+    b.cam.lookAt(b.tgt);
+    coverSparks(b, dt);
     b.renderer.render(b.scene, b.cam);
   }
   function coverStart() {
