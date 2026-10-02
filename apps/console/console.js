@@ -15,7 +15,7 @@
   /* Last plant rows/total from the plant loader (summary.machines). The
    * theme-C Plant hero reads this instead of scraping tile text, so 3D
    * floor labels ("3 meters", "CTs", "ok") can never leak into the kW sum. */
-  var PLANT_KW = { total: null, count: 0 };
+  var PLANT_KW = { total: null, count: 0, newest: null };
 
   /* Hero tiles (all screens): one hero tile per screen that has no
    * single existing hero element (plant, detect, health, act). Every value is
@@ -43,9 +43,24 @@
   }
   function refreshCHero(screen) {
     if (screen === "plant") {
-      cHeroUpsert("plant", "Live plant load",
+      var newestMs = PLANT_KW.newest ? new Date(PLANT_KW.newest).getTime() : NaN;
+      var ageMs = isFinite(newestMs) ? Date.now() - newestMs : null;
+      var isFresh = ageMs != null && ageMs < FRESH_MS;
+      var plantSub;
+      if (!PLANT_KW.count) {
+        plantSub = "no live readings";
+      } else if (isFresh) {
+        plantSub = PLANT_KW.count + " machines live · SIMULATED";
+      } else if (ageMs != null) {
+        var minsAgo = Math.floor(ageMs / 60000);
+        var ageStr = minsAgo >= 60 ? Math.floor(minsAgo / 60) + " h" : minsAgo + " min";
+        plantSub = PLANT_KW.count + " machines · newest reading " + fmtT(PLANT_KW.newest) + " (" + ageStr + " ago) · SIMULATED";
+      } else {
+        plantSub = PLANT_KW.count + " machines · newest reading unknown · SIMULATED";
+      }
+      cHeroUpsert("plant", "Plant load, latest readings",
         PLANT_KW.count ? esc(fmt(PLANT_KW.total, 1)) + " kW" : cDash(),
-        PLANT_KW.count ? PLANT_KW.count + " feeds live" : "no live readings", "measured");
+        plantSub, "measured");
     } else if (screen === "detect") {
       var devs = [];
       Array.prototype.forEach.call(document.querySelectorAll("#detect-alerts-list .alert-dev"), function (n) {
@@ -94,6 +109,7 @@
 
   var SCREENS = ["plant", "detect", "heats", "twin", "bill", "health", "optimise", "brief", "act", "impact", "payback"];
   var STALE_MS = 15 * 60 * 1000;
+  var FRESH_MS = 5 * 60 * 1000;
   var TZ = "Asia/Kolkata";
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -437,18 +453,25 @@
       tiles.innerHTML = '<div class="tile">' + naHtml() + "<p class='note'>" +
         esc((machines && machines.error) || (summary && summary.error) || "") + "</p></div>";
       setChips("chips-plant", ["data unavailable", "updated " + fmtT(nowIso())]);
-      PLANT_KW = { total: null, count: 0 };
+      PLANT_KW = { total: null, count: 0, newest: null };
       return;
     }
     var rows = summary.machines || [];
-    /* Plant hero source: sum of latest_power_kw over rows with a reading.
+    /* Plant hero source: sum of latest_power_kw over rows with a reading,
+     * plus newest (max latest_ts over rows with a reading) for data age.
      * Never scraped from tile/floor-label text. */
     PLANT_KW = (function (rs) {
-      var t = 0, n = 0;
+      var t = 0, n = 0, newest = null, newestMs = null;
       rs.forEach(function (m) {
-        if (m.latest_power_kw != null && isFinite(m.latest_power_kw)) { t += m.latest_power_kw; n++; }
+        if (m.latest_power_kw != null && isFinite(m.latest_power_kw)) {
+          t += m.latest_power_kw; n++;
+          if (m.latest_ts) {
+            var ts = new Date(m.latest_ts).getTime();
+            if (isFinite(ts) && (newestMs == null || ts > newestMs)) { newestMs = ts; newest = m.latest_ts; }
+          }
+        }
       });
-      return { total: n ? t : null, count: n };
+      return { total: n ? t : null, count: n, newest: newest };
     })(rows);
     var totE = rows.reduce(function (a, m) { return a + (m.energy_kwh || 0); }, 0);
     var totP = rows.reduce(function (a, m) { return a + (m.production_good_kg || 0); }, 0);
@@ -501,7 +524,16 @@
     var maxKw = Math.max.apply(null, rows.map(function (m) { return m.latest_power_kw || 0; }).concat([1]));
     var alertM = {};
     anoms.forEach(function (e) { alertM[e.machine_id] = true; });
-    var fresh = rows.every(function (m) { return m.latest_ts && Date.now() - new Date(m.latest_ts).getTime() < STALE_MS; });
+    var fresh = (function (rs) {
+      var newestMs = null;
+      rs.forEach(function (m) {
+        if (m.latest_ts) {
+          var t = new Date(m.latest_ts).getTime();
+          if (isFinite(t) && (newestMs == null || t > newestMs)) newestMs = t;
+        }
+      });
+      return newestMs != null && Date.now() - newestMs < FRESH_MS;
+    })(rows);
     var s = [];
     /* supply bus */
     s.push(svgEl("text", { x: 20, y: 24, "class": "d-cap" }, "415 V three-phase plant supply"));
@@ -546,7 +578,7 @@
     var nodes = [
       ["RS-485 → Modbus TCP converter", "DIN-rail, isolated", null],
       ["Edge gateway", "Raspberry Pi or industrial PC · buffers to disk if the link drops", null],
-      ["JouleMitra server", "API " + (comp.api || "—") + " · database " + (comp.database || "—"), comp.database === "up"],
+      ["JouleMitra server", "API " + (comp.api || "—") + " · database " + (comp.database || "—") + " · simulator not tracked", comp.database === "up"],
     ];
     nodes.forEach(function (n, i) {
       var ny = 140 + i * 96;
@@ -2091,7 +2123,7 @@
     });
     labels.push({ obj: panel, y: 2.5, html: "<b>Meter panel</b><span>3 meters, CTs</span>" });
     labels.push({ obj: gw, y: 2, html: "<b>Edge gateway</b><span>buffers if the link drops</span>" });
-    labels.push({ obj: srv, y: 2.8, html: "<b>JouleMitra server</b><span>API " + esc(comp.api || "—") + " · database " + esc(comp.database || "—") + "</span>" });
+    labels.push({ obj: srv, y: 2.8, html: "<b>JouleMitra server</b><span>API " + esc(comp.api || "—") + " · database " + esc(comp.database || "—") + " · simulator not tracked</span>" });
     /* Ethernet: panel -> gateway -> server */
     [[[-1, 1.6, -3.8], [3.2, 1.2, -3.8]], [[3.2, 1.2, -3.8], [6.2, 1.2, -3.8]]].forEach(function (s) {
       var c = new THREE.LineCurve3(new THREE.Vector3().fromArray(s[0]), new THREE.Vector3().fromArray(s[1]));
@@ -2171,7 +2203,7 @@
    * A guided walk through the loop: eight captioned stops. Step 2 opens the
    * fault panel so the judge picks the air-leak fault themselves. */
   var TOUR = [
-    ["plant", "A small foundry: compressor, induction furnace, cooling pump. Every number here is live from the simulator."],
+    ["plant", "A small foundry: compressor, induction furnace, cooling pump. Every number here comes from the simulator."],
     ["plant", "Break something. Pick \u2018Air leak on the compressor\u2019 \u2014 it rewrites 4 hours of simulated data."],
     ["detect", "Detected: energy above what the work needed, while output stayed the same."],
     ["health", "Health and energy together: is it wear, or process waste?"],

@@ -149,6 +149,7 @@ h1, .screen-head h1, .hero-title, .hero-num, .pb-months {
 .attn-list a { text-decoration: none; }
 .attn-list a:hover { text-decoration: underline; }
 #plant-tiles { min-height: 0; background: var(--color-sheet); border: var(--border-thin) solid var(--color-rule); border-radius: var(--radius-sheet); padding: var(--space-3) var(--space-4); }
+#plant-tiles:focus-visible { outline: var(--ring-width) solid var(--color-projected); outline-offset: 2px; }
 .diagram { width: 100%; height: 100%; display: block; font-family: var(--font-body); }
 .diagram text { fill: var(--color-ink); }
 .d-cap { font-size: 15px; font-weight: 700; }

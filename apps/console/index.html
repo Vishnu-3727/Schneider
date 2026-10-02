@@ -34,15 +34,15 @@
   </header>
 
   <main class="screens">
-    <section class="screen" id="screen-plant" aria-label="Plant, live">
+    <section class="screen" id="screen-plant" aria-label="Plant overview">
       <div class="screen-head">
-        <div><h1>Plant, live</h1><p class="sub">Every machine now: what it draws, what it made, and what needs a look.</p></div>
+        <div><h1>Plant overview</h1><p class="sub">Every machine now: what it draws, what it made, and what needs a look.</p></div>
         <div class="chips" id="chips-plant"></div>
       </div>
       <div class="screen-body">
         <div class="kpi-row" id="plant-kpis"></div>
         <div class="attn"><h2>Needs attention</h2><ul class="attn-list" id="plant-attn"></ul></div>
-        <div class="plant-wrap"><div class="view-toggle" role="group" aria-label="Plant view"><button type="button" data-view="wiring">Wiring</button><button type="button" data-view="3d">3D floor</button></div><div id="plant-tiles"></div></div>
+        <div class="plant-wrap"><div class="view-toggle" role="group" aria-label="Plant view"><button type="button" data-view="wiring">Wiring</button><button type="button" data-view="3d">3D floor</button></div><div id="plant-tiles" tabindex="0" role="region" aria-label="Plant wiring diagram. Scroll sideways to see all of it."></div></div>
       </div>
     </section>
 
