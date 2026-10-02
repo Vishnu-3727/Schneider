@@ -20,6 +20,11 @@
   --color-verified-soft: oklch(28% 0.06 160);
   --color-warn: oklch(68% 0.2 25);           /* critical */
   --color-warn-soft: oklch(28% 0.07 25);
+  --color-melt-hot: oklch(90% 0.18 95);        /* molten cracks at their hottest */
+  --color-cover-shade: oklch(16% 0.012 255 / 0.88); /* flat semi-opaque panel behind cover text */
+  --bloom-accent: oklch(72% 0.19 45 / 0.14);
+  --bloom-verified: oklch(76% 0.15 160 / 0.12);
+  --bloom-projected: oklch(74% 0.13 255 / 0.12);
 
   --font-display: "Big Shoulders Display", "IBM Plex Sans", system-ui, sans-serif;
   --font-body: "IBM Plex Sans", "Noto Sans Tamil", "Noto Sans Devanagari", system-ui, sans-serif;

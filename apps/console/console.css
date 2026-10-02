@@ -2,6 +2,7 @@
  * numerals, IBM Plex Sans for body/labels, IBM Plex Mono for codes,
  * timestamps, chips, rule IDs and axis ticks. Flat surfaces only: no
  * gradients, glows, shadow stacks or glassmorphism. */
+/* Hallmark · genre: atmospheric · macrostructure: Marquee Hero (cover only) · theme: existing JouleMitra tokens · enrichment: Tier-D three.js molten shader (built) · nav: existing · footer: none */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow-x: clip; }
 html { font-size: var(--root-size); }
@@ -837,4 +838,77 @@ html.static .screen.leaving { display: none; }
   #screen-impact .hero-left:has(> .note) > .note { max-width: none; }
   #screen-impact .hero-num { font-size: 3rem; }
   #screen-payback .pb-months { font-size: 3rem; }
+}
+
+/* ---- 0 cover: Marquee Hero (left-weighted), molten furnace behind ---- */
+#screen-cover { position: relative; padding: 0; overflow: hidden; background-color: var(--color-paper); }
+#cover-bg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background-color: var(--color-paper); }
+#screen-cover.cover-flat { background-color: var(--color-paper); background-image: radial-gradient(45% 75% at 78% 42%, var(--bloom-accent), rgba(0, 0, 0, 0) 100%); }
+#screen-cover.cover-flat #cover-bg { display: none; }
+.cover-inner { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; align-items: center; padding: var(--space-6) var(--space-10); }
+.cover-copy {
+  width: 55%; max-width: 46rem;
+  background: var(--color-cover-shade);
+  border: var(--border-thin) solid var(--color-rule);
+  border-radius: var(--radius-sheet);
+  padding: var(--space-8);
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+.cover-h1 { margin: 0; font-family: var(--font-display); font-weight: 800; font-size: 4.25rem; line-height: 1; letter-spacing: var(--title-tracking); }
+.cover-sub { margin: 0; font-size: var(--text-lead); color: var(--color-ink-2); line-height: 1.35; }
+.cover-proof { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; border-top: var(--border-thin) solid var(--color-rule); padding-top: var(--space-4); }
+.cover-big { font-family: var(--font-numerals); font-weight: 900; font-size: 3.5rem; line-height: 1; color: var(--color-verified); }
+.cover-proof-txt { font-size: 1.05rem; color: var(--color-ink); }
+.cover-badges { display: inline-flex; gap: var(--space-2); }
+/* Ask JouleMitra composer: rounded box, brightens on hover and focus. */
+.ask, #ask { background: var(--color-sheet); border: var(--border-thin) solid var(--color-rule); border-radius: 1rem; padding: var(--space-4) var(--space-5); display: flex; flex-direction: column; gap: var(--space-2); }
+.ask:hover, #ask:hover { border-color: var(--color-ink-3); }
+.ask:focus-within, #ask:focus-within { border-color: var(--color-ink-3); }
+.ask label, #ask label { font-weight: 700; font-size: 1rem; }
+.ask-row { display: flex; gap: var(--space-3); align-items: center; }
+#ask-q { flex: 1; min-width: 0; font: inherit; font-family: var(--font-body); color: var(--color-ink); background: var(--color-sheet); border: var(--border-thin) solid var(--color-rule); border-radius: 4px; padding: var(--space-2); }
+#ask-q:hover { border-color: var(--color-ink-3); background: var(--color-sheet); }
+#ask-q:focus { outline: none; border-color: var(--color-ink-3); }
+#ask-q:focus-visible { outline: var(--ring-width) solid var(--color-projected); outline-offset: 2px; }
+#ask-q:active { background: var(--color-sheet); }
+#ask-q:disabled { opacity: 0.5; }
+#ask-go { font: inherit; font-weight: 700; padding: var(--space-2) var(--space-5); border-radius: var(--radius-pill); border: 2px solid var(--color-ink-3); background: transparent; color: var(--color-ink-2); cursor: pointer; white-space: nowrap; }
+#ask-go:not(:disabled) { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-paper); }
+#ask-go:not(:disabled):hover { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-paper); }
+#ask-go:focus-visible { outline: var(--ring-width) solid var(--color-projected); outline-offset: 2px; }
+#ask-go:not(:disabled):active { opacity: var(--opacity-pressed); }
+#ask-go:disabled { opacity: 0.55; cursor: default; }
+.ask-out { margin: 0; font-size: 0.95rem; color: var(--color-ink); }
+.ask-out:empty { display: none; }
+.ask-chips { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.ask-chip { font: inherit; font-size: 0.9rem; font-weight: 600; padding: var(--space-1) var(--space-4); border-radius: var(--radius-pill); border: var(--border-thin) solid var(--color-ink-3); background: var(--color-paper); color: var(--color-ink); cursor: pointer; }
+.ask-chip:hover { background: var(--color-ink); color: var(--color-paper); border-color: var(--color-ink); }
+.ask-chip:focus-visible { outline: var(--ring-width) solid var(--color-projected); outline-offset: 2px; }
+.ask-chip:active { opacity: var(--opacity-pressed); }
+.ask-chip:disabled { opacity: 0.5; cursor: default; }
+.ask .note { margin: 0; }
+.cover-ctas { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.cover-ctas .btn { margin: 0; }
+.cover-ctas a.btn { display: inline-block; text-decoration: none; }
+.cover-primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-paper); }
+.cover-primary:hover { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-paper); }
+/* Brand is a link back to the cover. */
+.brand-home { display: inline-flex; align-items: center; gap: var(--space-2); color: inherit; text-decoration: none; border-radius: var(--radius-pill); }
+.brand-home:hover { text-decoration: underline; }
+.brand-home:focus-visible { outline: var(--ring-width) solid var(--color-projected); outline-offset: 2px; }
+.brand-home:active { opacity: var(--opacity-pressed); }
+/* Subtle static blooms behind the two hero areas only; panels stay flat. */
+.impact-hero { background-image: radial-gradient(55% 120% at 100% 0%, var(--bloom-verified), rgba(0, 0, 0, 0) 100%); }
+#pb-out { background-image: radial-gradient(55% 120% at 0% 0%, var(--bloom-projected), rgba(0, 0, 0, 0) 100%); }
+
+/* Cover in flow layout: one column, canvas on top, content below. */
+@media (max-width: 1100px), (orientation: portrait) {
+  #screen-cover { padding: 0; }
+  #cover-bg { position: relative; inset: auto; height: 45svh; min-height: 16rem; }
+  .cover-inner { padding: var(--space-4); align-items: flex-start; }
+  .cover-copy { width: 100%; max-width: none; padding: var(--space-5) var(--space-4); }
+  .cover-h1 { font-size: 2.75rem; }
+  .cover-big { font-size: 3rem; }
+  .cover-ctas { flex-direction: column; align-items: stretch; }
+  .cover-ctas .btn { width: 100%; white-space: nowrap; }
 }

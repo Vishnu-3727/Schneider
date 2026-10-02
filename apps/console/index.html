@@ -18,7 +18,7 @@
 <div class="viewport">
 <div class="stage" id="stage">
   <header class="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>JouleMitra<span class="flow-step" id="flow-step" aria-live="polite"></span></div>
+    <div class="brand"><a class="brand-home" href="#cover"><span class="brand-mark" aria-hidden="true"></span>JouleMitra</a><span class="flow-step" id="flow-step" aria-live="polite"></span></div>
     <div class="flow-wrap">
     <button type="button" class="flow-nav" id="flow-prev" aria-label="Earlier screens">‹</button>
     <nav class="flow" id="flow" aria-label="The JouleMitra loop">
@@ -34,6 +34,30 @@
   </header>
 
   <main class="screens">
+    <section class="screen" id="screen-cover" aria-label="JouleMitra">
+      <canvas id="cover-bg" aria-hidden="true"></canvas>
+      <div class="cover-inner">
+        <div class="cover-copy">
+          <h1 class="cover-h1">Find the rupees your furnace wastes.</h1>
+          <p class="cover-sub">Then prove the saving against what would have happened anyway.</p>
+          <div class="cover-proof" id="cover-proof" aria-live="polite"><span class="cover-big">—</span></div>
+          <form id="ask">
+            <label for="ask-q">Ask JouleMitra</label>
+            <div class="ask-row">
+              <input id="ask-q" name="q" type="text" autocomplete="off" maxlength="200" placeholder="Ask about waste, heats, health, savings…">
+              <button type="submit" id="ask-go" disabled>Ask</button>
+            </div>
+            <p class="ask-out" id="ask-out" aria-live="polite"></p>
+            <p class="note">Matches your question to the right screen. No AI, works offline.</p>
+          </form>
+          <div class="cover-ctas">
+            <button type="button" class="btn cover-primary" id="cover-tour">Play story</button>
+            <a class="btn cover-secondary" href="#plant">Open the plant</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="screen" id="screen-plant" aria-label="Plant overview">
       <div class="screen-head">
         <div><h1>Plant overview</h1><p class="sub">Every machine now: what it draws, what it made, and what needs a look.</p></div>

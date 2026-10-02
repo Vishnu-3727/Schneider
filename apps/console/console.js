@@ -107,7 +107,9 @@
     }
   }
 
-  var SCREENS = ["plant", "detect", "heats", "twin", "bill", "health", "optimise", "brief", "act", "impact", "payback"];
+  var SCREENS = ["cover", "plant", "detect", "heats", "twin", "bill", "health", "optimise", "brief", "act", "impact", "payback"];
+  /* The numbered loop excludes the cover: steps stay 1-11. */
+  var NUMBERED = SCREENS.filter(function (s) { return s !== "cover"; });
   var STALE_MS = 15 * 60 * 1000;
   var FRESH_MS = 5 * 60 * 1000;
   var TZ = "Asia/Kolkata";
@@ -2318,11 +2320,328 @@
     })();
   })();
 
+  /* ================= 0. COVER =================
+   * Marquee Hero: molten furnace shader behind the headline, a live proof
+   * line from GET /verification, and the Ask box, which matches a typed
+   * question to the screen that answers it (plain keyword table, no AI). */
+  var ASK_QS = [
+    "Why is the compressor using more energy?",
+    "Which heat cost the most?",
+    "Did the change really save energy?",
+    "How fast does it pay back?",
+    "What do I tell the shift supervisor?"
+  ];
+  var ASK_STATIC_PH = "Ask about waste, heats, health, savings…";
+  var ASK_NAMES = { plant: "Plant", detect: "Detect", heats: "Heats", twin: "Twin", bill: "Bill",
+    health: "Health", optimise: "Plan", brief: "Brief", act: "Act", impact: "Prove", payback: "Scale" };
+  /* One keyword table, first match wins, case-insensitive. */
+  var ASK_ROUTES = [
+    ["compressor|air|leak|waste|anomal|alert|abnormal", "detect", "that is where waste gets caught"],
+    ["heat|melt|tonne|kwh/t|batch", "heats", "every heat, costed"],
+    ["simulate|what if|try a heat|twin", "twin", "run the heat before you run it"],
+    ["bill|cost|rupee|₹|power factor|pf|demand|carbon|co2|cbam|export", "bill", "the whole bill, in one place"],
+    ["health|wear|vibration|temperature|maintenance", "health", "machine health and wear"],
+    ["schedule|plan(?!t)|tomorrow|tariff|shift time|peak", "optimise", "plan tomorrow's heats"],
+    ["supervisor|brief|tamil|hindi|morning", "brief", "the morning brief for the supervisor"],
+    ["approve|recommend|action|step", "act", "from advice to action"],
+    ["save|saving|verify|proof|prove|real", "impact", "proven savings, measured and verified"],
+    ["payback|pay back|roi|loan|adeetie|subscription|scale", "payback", "what it pays back"],
+    ["plant|machine|overview|now", "plant", "the plant, live"]
+  ];
+  var ASK_CHIPS = [["Waste", "detect"], ["Heats", "heats"], ["Savings", "impact"], ["Payback", "payback"]];
+  var askWired = false, askTypeTimers = [], askNavTimer = null;
+  function askLater(fn, ms) { askTypeTimers.push(setTimeout(fn, ms)); }
+  function askClearTyping() {
+    askTypeTimers.forEach(function (t) { clearTimeout(t); });
+    askTypeTimers = [];
+  }
+  function askStopTyping(input) {
+    askClearTyping();
+    if (input && input.getAttribute("placeholder") !== ASK_STATIC_PH) {
+      input.setAttribute("placeholder", ASK_STATIC_PH);
+    }
+  }
+  function askStartTyping(input) {
+    askClearTyping();
+    if (reducedMotion()) { input.setAttribute("placeholder", ASK_STATIC_PH); return; }
+    function erase(q, done) {
+      if (!q.length) { done(); return; }
+      input.setAttribute("placeholder", q.slice(0, -1));
+      askLater(function () { erase(q.slice(0, -1), done); }, 18);
+    }
+    function type(q, pos, done) {
+      if (pos > q.length) { askLater(function () { erase(q, done); }, 1600); return; }
+      input.setAttribute("placeholder", q.slice(0, pos));
+      askLater(function () { type(q, pos + 1, done); }, 45);
+    }
+    function cycle(i) {
+      var q = ASK_QS[i % ASK_QS.length];
+      type(q, 0, function () { cycle(i + 1); });
+    }
+    cycle(0);
+  }
+  function askRoute(q) {
+    for (var i = 0; i < ASK_ROUTES.length; i++) {
+      if (new RegExp(ASK_ROUTES[i][0], "i").test(q)) return ASK_ROUTES[i];
+    }
+    return null;
+  }
+  function askSubmit(e) {
+    if (e) e.preventDefault();
+    var input = document.getElementById("ask-q"), out = document.getElementById("ask-out");
+    if (!input || !out) return;
+    var hit = askRoute(input.value);
+    if (askNavTimer) { clearTimeout(askNavTimer); askNavTimer = null; }
+    if (hit) {
+      out.innerHTML = "Opening " + esc(ASK_NAMES[hit[1]] || hit[1]) + ": " + esc(hit[2]) + ".";
+      if (reducedMotion()) { window.location.hash = "#" + hit[1]; }
+      else { askNavTimer = setTimeout(function () { window.location.hash = "#" + hit[1]; }, 600); }
+    } else {
+      out.innerHTML = "I match questions to the screen that answers them. Try one of these: " +
+        '<span class="ask-chips">' + ASK_CHIPS.map(function (c) {
+          return '<button type="button" class="ask-chip" data-goto="' + c[1] + '">' + esc(c[0]) + "</button>";
+        }).join("") + "</span>";
+      Array.prototype.forEach.call(out.querySelectorAll("[data-goto]"), function (b) {
+        b.addEventListener("click", function () { window.location.hash = "#" + b.getAttribute("data-goto"); });
+      });
+    }
+  }
+  function wireAsk() {
+    if (askWired) return;
+    askWired = true;
+    var form = document.getElementById("ask");
+    if (!form) return;
+    var input = document.getElementById("ask-q"), go = document.getElementById("ask-go");
+    askStartTyping(input);
+    input.addEventListener("focus", function () { askStopTyping(input); });
+    input.addEventListener("input", function () { askStopTyping(input); go.disabled = !input.value.trim(); });
+    input.addEventListener("blur", function () { if (!input.value) askStartTyping(input); });
+    form.addEventListener("submit", askSubmit);
+    document.getElementById("cover-tour").addEventListener("click", startTour);
+  }
+  async function loadCover() {
+    wireAsk();
+    coverStart();
+    var el = document.getElementById("cover-proof");
+    var vrs = await api("/verification");
+    var rows = (vrs && !vrs.error && vrs.verification) || [];
+    var v = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].outcome === "VERIFIED") { v = rows[i]; break; }
+    }
+    if (!v || v.saving_pct == null || !isFinite(v.saving_pct)) {
+      el.innerHTML = '<span class="cover-big">—</span>' +
+        '<span class="cover-proof-txt">No verified saving yet.</span>';
+      return;
+    }
+    var ivs = await api("/interventions");
+    var mid = null;
+    ((ivs && !ivs.error && ivs.interventions) || []).forEach(function (iv) {
+      if (iv.id === v.intervention_id) mid = iv.machine_id;
+    });
+    el.innerHTML = '<span class="cover-big">−' + esc(fmt(v.saving_pct, 1)) + ' %</span>' +
+      '<span class="cover-proof-txt">less energy per tonne' + (mid ? " on " + esc(mid) : "") +
+      ", measured and verified</span>" +
+      '<span class="cover-badges">' + badge("VERIFIED", "verified") + " " + badge("SIMULATED data") + "</span>";
+  }
+
+  /* Cover background: molten furnace surface seen from slightly above,
+   * placed right of centre, static camera. One WebGL context, created once
+   * and reused; the rAF loop runs only while the cover is the active
+   * screen and the page is visible. Reduced motion renders one still. */
+  var coverBg = null, coverBuilt = false, coverRaf = null;
+  var coverCssCanvas = null;
+  function coverCss(name) {
+    var el = document.createElement("div");
+    el.style.color = "var(" + name + ")";
+    el.style.display = "none";
+    document.body.appendChild(el);
+    var c = getComputedStyle(el).color;
+    el.remove();
+    if (!c) return "#ffffff";
+    /* Tokens are OKLCH; Chromium returns "oklch(...)" which THREE.Color
+     * cannot parse (falls back to white). Normalise to rgb() once here
+     * via a cached 1x1 2D canvas. colors() is untouched (Plotly takes oklch). */
+    try {
+      if (!coverCssCanvas) coverCssCanvas = document.createElement("canvas");
+      coverCssCanvas.width = 1;
+      coverCssCanvas.height = 1;
+      var ctx = coverCssCanvas.getContext("2d");
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = c;
+      ctx.fillRect(0, 0, 1, 1);
+      var d = ctx.getImageData(0, 0, 1, 1).data;
+      return "rgb(" + d[0] + ", " + d[1] + ", " + d[2] + ")";
+    } catch (e) { return c; }
+  }
+  function coverFlat() {
+    var canvas = document.getElementById("cover-bg");
+    var section = document.getElementById("screen-cover");
+    if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    if (section) section.classList.add("cover-flat");
+    coverBg = null;
+  }
+  function coverBuild() {
+    if (coverBuilt) return coverBg;
+    coverBuilt = true;
+    var canvas = document.getElementById("cover-bg");
+    if (!canvas || !window.THREE) { coverFlat(); return null; }
+    var renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false, alpha: false });
+    } catch (e) { coverFlat(); return null; }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    var scene = new THREE.Scene();
+    renderer.setClearColor(new THREE.Color(coverCss("--color-paper")));
+    var cam = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    /* Crucible centred at ~74% width / 56% height on desktop (right of the
+     * ~48% text panel), centred with a small margin on narrow canvases.
+     * Unit group has outer radius 1: melt 0.94, rim ring 0.96 + tube 0.04
+     * (thin dark band ~8% of outer radius), scaled in coverResize so the
+     * outer diameter is ~62% of the cover height and fully on-screen. */
+    if (cam.clearViewOffset) cam.clearViewOffset();
+    var discX = 0, discZ = 0, curRo = 1.7;
+    var CAM_H = 4.2, CAM_D = 5.2;
+    cam.position.set(discX, CAM_H, discZ + CAM_D);
+    cam.lookAt(discX, 0, discZ);
+    var accent = new THREE.Color(coverCss("--color-accent"));
+    var hot = new THREE.Color(coverCss("--color-melt-hot"));
+    var crust = new THREE.Color(coverCss("--color-paper"));
+    var sheet = new THREE.Color(coverCss("--color-sheet"));
+    var surfMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uCrust: { value: crust }, uAccent: { value: accent }, uHot: { value: hot } },
+      vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+      fragmentShader: [
+        "varying vec2 vUv;",
+        "uniform float uTime; uniform vec3 uCrust; uniform vec3 uAccent; uniform vec3 uHot;",
+        "float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }",
+        "float vnoise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+        "  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }",
+        "float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += a * vnoise(p); p *= 2.03; a *= 0.5; } return v; }",
+        "void main() {",
+        "  float n = fbm(vUv * 5.0 + vec2(uTime * 0.04, uTime * 0.015));",
+        "  float r = length(vUv - 0.5) * 2.0;",
+        "  float edge = smoothstep(1.0, 0.72, r);",
+        "  vec3 col = mix(uCrust, uAccent, smoothstep(0.42, 0.62, n));",
+        "  col = mix(col, uHot, smoothstep(0.68, 0.73, n));",
+        "  float fl = 1.0 + 0.08 * sin(uTime * 0.9);",
+        "  gl_FragColor = vec4(col * fl * edge, 1.0);",
+        "}"
+      ].join("\n")
+    });
+    var cruc = new THREE.Group();
+    cruc.position.set(discX, 0, discZ);
+    cruc.scale.set(curRo, curRo, curRo);
+    scene.add(cruc);
+    var surf = new THREE.Mesh(new THREE.CircleGeometry(0.94, 64), surfMat);
+    surf.rotation.x = -Math.PI / 2;
+    cruc.add(surf);
+    var rim = new THREE.Mesh(new THREE.TorusGeometry(0.96, 0.04, 14, 96),
+      new THREE.MeshBasicMaterial({ color: sheet }));
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = 0.02;
+    cruc.add(rim);
+    var lip = new THREE.Mesh(new THREE.TorusGeometry(0.915, 0.012, 8, 96),
+      new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.35 }));
+    lip.rotation.x = Math.PI / 2;
+    lip.position.y = 0.021;
+    cruc.add(lip);
+    var N = 48, pos = new Float32Array(N * 3), col = new Float32Array(N * 3), spd = new Float32Array(N);
+    function sparkPlace(i, anywhere) {
+      var a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * 0.80 * curRo;
+      pos[i * 3] = discX + Math.cos(a) * rr;
+      pos[i * 3 + 1] = anywhere ? Math.random() * 2.6 : Math.random() * 0.3;
+      pos[i * 3 + 2] = discZ + Math.sin(a) * rr;
+      spd[i] = 0.25 + Math.random() * 0.45;
+    }
+    for (var i = 0; i < N; i++) sparkPlace(i, true);
+    var sg = new THREE.BufferGeometry();
+    sg.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    sg.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    var sparks = new THREE.Points(sg, new THREE.PointsMaterial({ size: 0.07, vertexColors: true,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    scene.add(sparks);
+    coverBg = { renderer: renderer, scene: scene, cam: cam, surfMat: surfMat,
+      sg: sg, pos: pos, col: col, spd: spd, accent: accent, n: N, t: 0, place: sparkPlace,
+      cruc: cruc, discX: discX, discZ: discZ, camH: CAM_H, camD: CAM_D,
+      getRo: function () { return curRo; }, setRo: function (r) { curRo = r; } };
+    coverResize();
+    return coverBg;
+  }
+  function coverResize() {
+    if (!coverBg) return;
+    var canvas = document.getElementById("cover-bg");
+    if (!canvas) return;
+    var w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+    coverBg.renderer.setSize(w, h, false);
+    var narrow = w < 600 || (w / h) < 0.9;
+    var u = narrow ? 0.5 : 0.74, v = narrow ? 0.5 : 0.56;
+    var dist = Math.sqrt(coverBg.camH * coverBg.camH + coverBg.camD * coverBg.camD);
+    var halfH = dist * Math.tan(coverBg.cam.fov * Math.PI / 360);
+    var H = halfH * 2;
+    coverBg.cam.aspect = w / h;
+    if (coverBg.cam.clearViewOffset) coverBg.cam.clearViewOffset();
+    coverBg.cam.updateProjectionMatrix();
+    var W = H * coverBg.cam.aspect;
+    var Ro = Math.min(0.31 * H, narrow ? 0.43 * W : 0.31 * H);
+    coverBg.setRo(Ro);
+    coverBg.cruc.scale.set(Ro, Ro, Ro);
+    var ndcX = u * 2 - 1, ndcY = 1 - 2 * v;
+    var sinPhi = coverBg.camH / dist;
+    var dx = ndcX * (W / 2);
+    var dz = -ndcY * (H / 2) / sinPhi;
+    coverBg.cam.position.set(coverBg.discX, coverBg.camH, coverBg.discZ + coverBg.camD);
+    coverBg.cam.lookAt(coverBg.discX - dx, 0, coverBg.discZ - dz);
+  }
+  function coverFrame(dt) {
+    var b = coverBg;
+    if (!b) return;
+    b.t += dt;
+    b.surfMat.uniforms.uTime.value = b.t;
+    var i, y, k;
+    for (i = 0; i < b.n; i++) {
+      y = b.pos[i * 3 + 1] + b.spd[i] * dt;
+      if (y > 2.6) { b.place(i, false); y = b.pos[i * 3 + 1]; }
+      else { b.pos[i * 3 + 1] = y; }
+      k = Math.max(0, 1 - y / 2.6);
+      b.col[i * 3] = b.accent.r * k;
+      b.col[i * 3 + 1] = b.accent.g * k;
+      b.col[i * 3 + 2] = b.accent.b * k;
+    }
+    b.sg.attributes.position.needsUpdate = true;
+    b.sg.attributes.color.needsUpdate = true;
+    b.renderer.render(b.scene, b.cam);
+  }
+  function coverStart() {
+    if (!coverBuild()) return;
+    coverResize();
+    if (reducedMotion()) { coverFrame(0); return; }
+    if (coverRaf != null) return;
+    var last = performance.now();
+    function loop(now) {
+      coverRaf = null;
+      if (current() !== "cover" || (document.visibilityState && document.visibilityState !== "visible")) return;
+      var dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      coverFrame(dt);
+      coverRaf = requestAnimationFrame(loop);
+    }
+    coverRaf = requestAnimationFrame(loop);
+  }
+  function coverStop() {
+    if (coverRaf != null) { cancelAnimationFrame(coverRaf); coverRaf = null; }
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") { if (current() === "cover") coverStart(); }
+    else coverStop();
+  });
+  window.addEventListener("resize", coverResize);
+
   /* ---------- router ---------- */
-  var loaders = { plant: loadPlant, detect: loadDetect, health: loadHealth, optimise: loadOptimise, act: loadAct, impact: loadImpact, payback: loadPayback, heats: loadHeats, bill: loadBill, brief: loadBrief, twin: loadTwin };
+  var loaders = { cover: loadCover, plant: loadPlant, detect: loadDetect, health: loadHealth, optimise: loadOptimise, act: loadAct, impact: loadImpact, payback: loadPayback, heats: loadHeats, bill: loadBill, brief: loadBrief, twin: loadTwin };
   function current() {
-    var h = (window.location.hash || "#plant").replace("#", "").split("?")[0];
-    return SCREENS.indexOf(h) >= 0 ? h : "plant";
+    var h = (window.location.hash || "#cover").replace("#", "").split("?")[0];
+    return SCREENS.indexOf(h) >= 0 ? h : "cover";
   }
   function show() {
     var s = current();
@@ -2359,6 +2678,8 @@
       }
     }
     show._cur = s;
+    /* The cover is outside the numbered loop: the counter stays n of 11. */
+    if (s === "cover") coverStart(); else coverStop();
     document.querySelectorAll(".nav-step").forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-screen") === s);
     });
@@ -2366,7 +2687,7 @@
      * step centred inside the sideways-scrolling nav without moving the
      * page vertically (adjust the nav's scrollLeft only). */
     var stepEl = document.getElementById("flow-step");
-    if (stepEl) stepEl.textContent = "step " + (SCREENS.indexOf(s) + 1) + " of " + SCREENS.length;
+    if (stepEl) stepEl.textContent = s === "cover" ? "" : "step " + (NUMBERED.indexOf(s) + 1) + " of " + NUMBERED.length;
     (function centreNav() {
       var nav = document.getElementById("flow") || document.querySelector("nav.flow");
       if (!nav) return;
@@ -2448,7 +2769,7 @@
     if (i >= 0 && i < SCREENS.length) window.location.hash = "#" + SCREENS[i];
   });
 
-  if (!window.location.hash) window.location.hash = "#plant";
+  if (!window.location.hash) window.location.hash = "#cover";
   show();
   if (new URLSearchParams(window.location.search).has("tour")) startTour();
 })();
