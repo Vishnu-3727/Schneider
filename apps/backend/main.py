@@ -6,6 +6,7 @@ import pathlib
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -40,6 +41,7 @@ class _RevalidatedStatic(StaticFiles):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="JouleMitra API (Phase 1)")
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     @app.exception_handler(Exception)
     async def unhandled_handler(request: Request, exc: Exception):
@@ -85,7 +87,8 @@ def create_app() -> FastAPI:
             from importlib import resources
 
             p = resources.files("plotly") / "package_data" / "plotly.min.js"
-            return FileResponse(str(p), media_type="application/javascript")
+            return FileResponse(str(p), media_type="application/javascript",
+                                headers={"Cache-Control": "public, max-age=86400"})
         except (ImportError, OSError, TypeError):
             import plotly
 
@@ -93,6 +96,7 @@ def create_app() -> FastAPI:
             return FileResponse(
                 str(base / "package_data" / "plotly.min.js"),
                 media_type="application/javascript",
+                headers={"Cache-Control": "public, max-age=86400"},
             )
 
     console_dir = pathlib.Path(__file__).resolve().parents[2] / "apps" / "console"

@@ -230,6 +230,10 @@
     if (!el) return;
     el.innerHTML = parts.map(function (p) { return '<span class="chip">' + esc(p) + "</span>"; }).join("");
   }
+  /* ponytail: 20 s TTL, cleared on every POST; per-key invalidation if writes multiply */
+  var _apiCache = {};
+  var API_TTL_MS = 20000;
+  function apiCacheClear() { _apiCache = {}; }
   async function api(path, params) {
     var url = path;
     if (params) {
@@ -238,13 +242,21 @@
       }).join("&");
       if (q) url += "?" + q;
     }
-    try {
-      var r = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!r.ok) return { error: "HTTP " + r.status + " on " + path };
-      return await r.json();
-    } catch (e) {
-      return { error: "unreachable " + path + ": " + (e && e.message || e) };
-    }
+    var hit = _apiCache[url];
+    if (hit && (Date.now() - hit.t) < API_TTL_MS) return hit.p;
+    var p = (async function () {
+      try {
+        var r = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!r.ok) return { error: "HTTP " + r.status + " on " + path };
+        return await r.json();
+      } catch (e) {
+        return { error: "unreachable " + path + ": " + (e && e.message || e) };
+      }
+    })();
+    _apiCache[url] = { p: p, t: Date.now() };
+    var out = await p;
+    if (out && out.error) delete _apiCache[url];
+    return out;
   }
 
   /* ---------- plotly theme (colours resolved from CSS tokens) ---------- */
@@ -858,6 +870,7 @@
         constraints: { required_heats: Number(document.getElementById("pl-n").value), time_limit_s: 5 } };
       if (Number(cap.value)) body.constraints.peak_cap_kw = Number(cap.value);
       var r = await fetch("/optimization/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      apiCacheClear();
       var out = r.ok ? await r.json() : null;
       btn.disabled = false;
       if (!out) { msg.textContent = "The optimiser returned HTTP " + r.status + "."; return; }
@@ -1570,7 +1583,11 @@
     if (!tel || tel.error || tel.length < 2) return [];
     var rows = tel.slice().sort(function (a, b) { return new Date(a.ts) - new Date(b.ts); });
     var t0 = new Date(rows[rows.length - 1].ts).getTime() - 24 * 3600 * 1000;
-    rows = rows.filter(function (r) { return new Date(r.ts).getTime() >= t0; });
+    /* Copy each row: the telemetry array is shared via the api() cache, so
+     * the dkwh/dh fields added below must not leak into the cached objects. */
+    rows = rows.filter(function (r) { return new Date(r.ts).getTime() >= t0; }).map(function (r) {
+      return Object.assign({}, r);
+    });
     /* energy of each slice = meter counter difference to the previous reading */
     for (var i = 0; i < rows.length; i++) {
       var d = i ? rows[i].energy_kwh - rows[i - 1].energy_kwh : null;
@@ -1959,6 +1976,7 @@
         var r = await fetch("/recommendations/" + encodeURIComponent(btn.getAttribute("data-approve")) + "/acknowledge", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ decision: "APPROVED", note: "approved from the morning brief" }) });
+        apiCacheClear();
         btn.outerHTML = r.ok ? '<span class="badge verified">' + esc(T.approved) + " · " + esc(fmtT(nowIso())) + "</span>"
           : '<span class="badge warn">not recorded (HTTP ' + r.status + ")</span>";
       });
@@ -2135,6 +2153,7 @@
       document.querySelectorAll("[data-fault]").forEach(function (x) { x.disabled = true; });
       log.innerHTML = "<p>" + esc(b.textContent) + ": rewriting the last 4 hours and running detection…</p>";
       var r = await fetch("/demo/inject", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fault: fault, hours: 4 }) });
+      apiCacheClear();
       document.querySelectorAll("[data-fault]").forEach(function (x) { x.disabled = false; });
       if (r.status === 404) { log.innerHTML = "<p class='hot'>Demo mode is off. Start the backend with DEMO_MODE=true to use this.</p>"; return; }
       if (!r.ok) { log.innerHTML = "<p class='hot'>Failed: HTTP " + r.status + "</p>"; return; }
