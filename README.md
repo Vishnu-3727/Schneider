@@ -92,7 +92,55 @@ flowchart LR
 
 ## Quick start
 
-Prerequisites: Python 3.11 and Docker (running).
+The live link above is a read-only snapshot; to run the full interactive site (Try a fault, approve, re-plan) on your own machine, you only need Docker Desktop.
+
+### Get the code
+
+```bash
+git clone https://github.com/Vishnu-3727/Schneider.git
+cd Schneider
+```
+
+No git? Use Code → Download ZIP on GitHub, unzip it, and open the folder.
+
+### One click
+
+Requires Docker Desktop (Windows, macOS) or Docker Engine with the compose plugin (Linux).
+
+Windows: double-click `start-demo.bat`. macOS / Linux:
+
+```bash
+./start-demo.sh
+```
+
+First run builds the image and loads the simulated plant (about 3–5 minutes); later runs are faster. It opens `http://localhost:8000/console/` when ready. Stop with `docker compose down`.
+
+### Same thing, step by step
+
+```bash
+docker compose up -d --build db mqtt backend
+docker compose exec -T backend python scripts/setup/init_db.py
+docker compose exec -T backend python scripts/demo/run_demo.py
+# then open http://localhost:8000/console/
+```
+
+They work the same in PowerShell.
+
+### What you get
+
+| URL | What it is |
+| --- | ---------- |
+| `http://localhost:8000/console/` | The web console, all 11 screens, live |
+| `http://localhost:8000/docs` | The API, Swagger UI |
+| `http://localhost:8501` | Streamlit dashboard; start it with `docker compose up -d dashboard` |
+
+### Troubleshooting
+
+- Port 8000 or 5432 already in use: stop the other program or run `docker compose down` first.
+- Docker is not running: start Docker Desktop, wait until it says Running, then run again.
+- Reset everything with `docker compose down -v` (deletes the demo database).
+
+<details><summary>Developer setup (Python 3.11, no Docker for the app)</summary>
 
 ```powershell
 py -3.11 -m venv .venv
@@ -102,18 +150,16 @@ docker compose up -d db mqtt
 .venv\Scripts\python scripts/setup/init_db.py
 ```
 
-One-click demo (starts the database and backend, runs the end-to-end demo, opens the console at `http://localhost:8000/console/`):
-
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\demo\demo.ps1 -Console
 ```
-
-Run the test suite against a real Postgres test database:
 
 ```powershell
 $env:TEST_DATABASE_URL = "postgresql+psycopg://joulemitra:joulemitra@localhost:5432/joulemitra_test"
 .venv\Scripts\python -m pytest -q
 ```
+
+</details>
 
 More commands (simulator, dashboard, Docker, API): [docs/DEVELOPMENT_NOTES.md](docs/DEVELOPMENT_NOTES.md).
 

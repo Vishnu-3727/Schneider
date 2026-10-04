@@ -41,6 +41,8 @@ services:
       MAD_WINDOW: 24
       NON_PRODUCTION_TYPES: pump,compressor
       BASELINE_MODEL_VERSION: v1-linear
+      # demo build: enables "Try a fault" on SIMULATED data; never set on a real plant
+      DEMO_MODE: "true"
     ports:
       - "8000:8000"
     depends_on:
