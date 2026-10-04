@@ -1,4 +1,4 @@
-param([switch]$Shifted, [switch]$Detection, [switch]$Dashboard)
+param([switch]$Shifted, [switch]$Detection, [switch]$Dashboard, [switch]$Console)
 $ErrorActionPreference = "Stop"
 # Repo root is two levels above this script (scripts/demo -> repo).
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
@@ -49,8 +49,13 @@ try {
     if ($startedBackend) { Write-Host "Dashboard (PID $($dash.Id)) + backend (PID $($backend.Id)) left running. Stop with: Stop-Process -Id $($backend.Id), $($dash.Id)" }
     else { Write-Host "Dashboard (PID $($dash.Id)) left running (backend on :8000 was already running). Stop with: Stop-Process -Id $($dash.Id)" }
   }
+  if ($Console) {
+    Start-Process 'http://localhost:8000/console/'
+    Write-Host 'Console open at http://localhost:8000/console/ (backend left running).'
+    if ($startedBackend) { Write-Host ('Stop backend with: Stop-Process -Id ' + $backend.Id) }
+  }
 }
 finally {
-  if ($startedBackend -and -not $Dashboard) { Stop-Process -Id $backend.Id -Force; Write-Host "[6/6] backend stopped." }
+  if ($startedBackend -and -not ($Dashboard -or $Console)) { Stop-Process -Id $backend.Id -Force; Write-Host "[6/6] backend stopped." }
 }
 exit $demoCode
