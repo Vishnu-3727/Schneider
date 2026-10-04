@@ -1,157 +1,159 @@
-# JouleMitra — software complete through Phase 6 (Phase 7 = deployment/wiring documentation only)
+<div align="center">
 
-Authoritative spec: `docs/spec/MASTER_SPEC.md`. Phase 1 committed (de875e9);
-Phase 2 scope: `docs/IMPLEMENTATION_PLAN.md` Phase 2 section. Simulator
-constants: `docs/ASSUMPTIONS.md`. Model cards: `docs/ML_MODELS.md`
-(baseline v1-linear; health `statistical-v1`; external `pbl-rul` adapter;
-CP-SAT scheduler + recommendation rules). Scenarios: `docs/SIMULATION.md`.
-Latest verification numbers: see docs/VALIDATION.md (Phases 2–5, all on
-SIMULATED data). Phase 7 wiring/CAD reference docs exist (docs/deployment/, cad/);
-ESP32/RPi firmware, deploy units and physical hardware are not done.
+# JouleMitra
 
-Phase 3 status: health interface (`MachineHealthModel` + registry),
-native `statistical-v1` (per-machine, state-conditioned median + MAD
-reference; `POST /machine-health/fit|/score`, `GET /machine-health`,
-`GET /machine-health/models`), energy + health correlation
-(`GET /insights`: ENERGY_ONLY / HEALTH_ONLY / COINCIDENT /
-ENERGY_ONLY_HEALTH_UNAVAILABLE, causation language banned), PBL adapter
-(`pbl-rul`: UNAVAILABLE without a local artifact, always OUT_OF_DOMAIN
-for factory machines — scoring them always uses `statistical-v1`),
-dashboard Equipment + Insights views (API-only; state as text + symbol),
-and the B1 physics fix (health-only degradation keeps voltage/current/
-power NORMAL; `energy_penalty > 0` raises power AND current at nominal
-voltage). 118 pre-existing tests preserved; PBL adds unit + integration
-tests including an optional ONNX test (runs when `PBL_TEST_ONNX_PATH`
-points at a local artifact and the `[pbl]` extra is installed).
+Find the energy your factory wastes, fix it, and prove the saving.
 
-Phase 4 status: tariff-aware CP-SAT scheduling (`POST /optimization/run`,
-`GET /optimization/schedule`, current vs recommended, projected energy /
-peak / cost / production + per-state breakdown, INFEASIBLE explanations,
-deterministic budget with a wall-clock TIMEOUT safety net) and a pure-rule
-recommendation engine (`POST /recommendations/generate`,
-`GET /recommendations`, `POST /recommendations/{id}/acknowledge` with
-404/409; idempotent; conflicts flagged, never dropped; accepted rows stay
-NOT_VERIFIED; savings-fact wording banned) with Optimisation +
-Recommendations dashboard views (API-only, PROJECTED ≠ MEASURED ≠
-VERIFIED legend, illustrative tariff). All figures simulated/projected;
-the projected schedule cost is the only Phase 4 money figure.
+Energy and process-efficiency intelligence for Indian SME foundries · Schneider Electric Challenge 04 · Team Tap to Tap
 
-Phase 5 status: explicit lifecycle (PENDING_REVIEW → APPROVED | REJECTED →
-APPLIED → MEASURED → VERIFIED | NOT_VERIFIED | NOT_COMPARABLE |
-INSUFFICIENT_DATA; `services/verification/lifecycle.py`, 409 on any illegal
-move, audit row per move; Phase 4 `ACCEPTED` renamed `APPROVED`).
-`POST /interventions` (idempotent by key), `POST /interventions/{id}/verify`
-(idempotent), `GET /interventions`, `GET /verification`,
-`GET /emission-factors`. Verification is a counterfactual (IPMVP/ISO 50015
-style): OLS on hourly production at t-1, t, t+1 fitted before the
-intervention (never on state hours, which the intervention changes), with
-ASHRAE Guideline 14 savings uncertainty. Only a VERIFIED saving is turned
-into cost (illustrative tariff, labelled) and CO2 (CEA grid factor with
-provenance). The simulator's chronic-holding waste and the REDUCE_IDLE /
-REPAIR interventions (effectiveness, compliance, rebound) produce SUCCESS,
-NO_EFFECT, WORSE, NOT_COMPARABLE and INSUFFICIENT_DATA from physics, not
-from labels. Dashboard: Verification view.
+[![live demo](https://img.shields.io/static/v1?label=live&message=demo&color=brightgreen&style=flat-square)](https://vishnu-3727.github.io/Schneider/)
+[![python 3.11](https://img.shields.io/static/v1?label=python&message=3.11&color=blue&style=flat-square)](docs/DEVELOPMENT_NOTES.md)
+[![tests 278 passed](https://img.shields.io/static/v1?label=tests&message=278%20passed&color=brightgreen&style=flat-square)](docs/DEVELOPMENT_NOTES.md)
+[![data simulated](https://img.shields.io/static/v1?label=data&message=simulated&color=orange&style=flat-square)](docs/ASSUMPTIONS.md)
+[![FastAPI](https://img.shields.io/static/v1?label=backend&message=FastAPI&color=teal&style=flat-square)](docs/ARCHITECTURE.md)
+[![PostgreSQL 16](https://img.shields.io/static/v1?label=database&message=PostgreSQL%2016&color=blueviolet&style=flat-square)](docs/DATA_MODEL.md)
 
-Phase 6 status: `edge/` gateway (docs/DEPLOYMENT.md). MQTT (paho) and
-Modbus TCP (pymodbus client, register maps as data with word/byte order,
-scaling, sentinels, ranges) adapters produce canonical telemetry only. A
-SQLite store-and-forward buffer delivers to the unchanged `/telemetry` and
-`/production` API (dead-letter for malformed or rejected records, nothing
-silently dropped, survives restarts and API outages). Mosquitto is in
-docker compose. The device simulator publishes the same SimulatedFactory
-data over MQTT and serves a simulated Modbus meter, so the simulator path
-and the device path share one pipeline and identical analytics.
+[**Live demo**](https://vishnu-3727.github.io/Schneider/) ·
+[**How it works**](#how-it-works) ·
+[**Quick start**](#quick-start) ·
+[**Results**](#results-simulated-plant-data) ·
+[**Docs**](#documentation)
 
-## Scope
+<img src="docs/readme/cover.png" width="100%" alt="JouleMitra console cover screen">
 
-All data is SIMULATED. The architecture is frozen: physical hardware,
-ESP32 firmware, Raspberry Pi service units and CAD drawings are
-intentionally NOT built. `docs/deployment/` shows how the same software
-connects to a real meter via RS-485 → Modbus TCP converter → edge
-gateway. Monitoring and human-in-the-loop only — no control of
-furnaces, motors or safety systems.
+</div>
 
-## Prerequisites
+## The problem
 
-- Python 3.11, Docker (running), PostgreSQL 16 via compose.
+Indian SME foundries get one bill a month, with no per-machine view.
+A busy day and a wasteful day look exactly the same on that bill.
+Savings are guessed, never proven.
 
-## Setup
+## What JouleMitra does
+
+| Step | What happens |
+| ---- | ------------ |
+| Measure | Reads existing panel meters over RS-485 Modbus, per machine, per hour. |
+| Detect | Compares actual energy with a baseline learned from each machine's own history, for the output it actually produced (kWh per tonne). |
+| Plan | A CP-SAT optimiser moves furnace heats out of peak-tariff hours, same heats and same output. |
+| Act | Ranked actions in a morning brief (English, Tamil, Hindi); a supervisor approves; nothing is switched automatically. |
+| Verify | Counterfactual measurement with ASHRAE Guideline 14 uncertainty; a saving is claimed only when it beats the error band. |
+
+## Results (simulated plant data)
+
+| Result | What it means |
+|---|---|
+| **−6.9 %** | less energy on furnace-01 after the idle-holding fix (VERIFIED on simulated data) |
+| **546.7 ± 209.6 kWh** | saved in 70 measured hours; the saving is 2.6× its 90 % error band |
+| **1 in 100** | false claims across 100 runs where the fix did nothing |
+| **≈ 2.2 months** | projected payback on a ₹75,000 kit |
+
+All plant figures come from the simulator. The pipeline was also run on a year of real steel-plant meter data (UCI #851). Details: [docs/VALIDATION.md](docs/VALIDATION.md).
+
+## See it
+
+<table>
+<tr>
+<td><img src="docs/readme/plant.png" alt="Plant overview"><br><b>Plant overview</b></td>
+<td><img src="docs/readme/detect.png" alt="Waste caught early"><br><b>Waste caught early</b></td>
+</tr>
+<tr>
+<td><img src="docs/readme/optimise.png" alt="Plan tomorrow"><br><b>Plan tomorrow</b></td>
+<td><img src="docs/readme/brief.png" alt="Morning brief"><br><b>Morning brief</b></td>
+</tr>
+</table>
+
+<img src="docs/readme/impact.png" width="100%" alt="Savings proven against the counterfactual">
+
+*Savings, proven against what would have happened anyway.*
+
+Open the [live console](https://vishnu-3727.github.io/Schneider/) (read-only snapshot; run locally for live actions).
+
+## How it works
+
+```mermaid
+flowchart LR
+    CT["CT clamps"] --> METER["Energy meter (Modbus RTU)"] --> CONV["RS-485 to TCP converter"] --> EDGE["Edge gateway (Raspberry Pi, store-and-forward)"] --> SRV
+    subgraph SRV["JouleMitra server (FastAPI + PostgreSQL)"]
+        direction TB
+        BASE["Baseline (NNLS)"] --> ANOM["Anomaly detection"] --> HEALTH["Machine health"] --> OPT["Optimiser (CP-SAT)"] --> REC["Recommendations"] --> VER["Verification (ASHRAE G14)"]
+    end
+    SRV --> CONSOLE["Web console"] & BRIEF["Morning brief"] & ERP["ERP-MES export"]
+```
+
+| Layer | Technology |
+| ----- | ---------- |
+| Backend | Python 3.11, FastAPI, Pydantic, SQLAlchemy |
+| Data | PostgreSQL 16, SQLite edge buffer |
+| Analytics | NumPy, Pandas, SciPy, Google OR-Tools CP-SAT |
+| Industrial IoT | MQTT/Mosquitto, Modbus TCP/pymodbus, RS-485 |
+| Frontend | Web console with three.js, Streamlit + Plotly |
+| Quality | pytest, Ruff, Docker Compose |
+
+## Quick start
+
+Prerequisites: Python 3.11 and Docker (running).
 
 ```powershell
 py -3.11 -m venv .venv
 .venv\Scripts\python -m pip install -e .[dev]
 Copy-Item .env.example .env
-docker compose up -d db
+docker compose up -d db mqtt
 .venv\Scripts\python scripts/setup/init_db.py
 ```
 
-## Run
+One-click demo (starts the database and backend, runs the end-to-end demo, opens the console at `http://localhost:8000/console/`):
 
 ```powershell
-# Backend API (http://localhost:8000)
-.venv\Scripts\python -m uvicorn apps.backend.main:app --port 8000
-
-# Simulator: 24h NORMAL scenario, post to API (uses ?backfill=true, see docs/ASSUMPTIONS.md A10)
-.venv\Scripts\python -m apps.simulator --scenario NORMAL --hours 24 --step-s 60 --seed 1 --post
-# ... or write CSVs instead:
-.venv\Scripts\python -m apps.simulator --scenario NORMAL --hours 24 --seed 1 --csv data/simulated/normal_24h.csv
-
-# Dashboard (http://localhost:8501, reads ONLY from the API)
-.venv\Scripts\python -m streamlit run apps/dashboard/app.py
-# Energy + Alerts pages: actual vs expected, SEC trend, baseline quality,
-# anomaly list with acknowledge (all DERIVED from SIMULATED data)
+powershell -ExecutionPolicy Bypass -File scripts\demo\demo.ps1 -Console
 ```
 
-### End-to-end demo
-
-```powershell
-# Full story through the API: ingest SIMULATED history -> baseline -> detect ->
-# health -> insights -> optimise -> recommend -> approve -> intervene -> verify
-.venv\Scripts\python scripts/demo/run_demo.py            # REDUCE_IDLE, proves a real saving verifies (VERIFIED)
-.venv\Scripts\python scripts/demo/run_demo.py --shifted  # shifted operating conditions, proves the guardrail holds (NOT_COMPARABLE)
-powershell -ExecutionPolicy Bypass -File scripts\demo\demo.ps1 [-Shifted] [-Detection] [-Dashboard]  # one-click: db+mqtt, backend, demo
-```
-
-Console (`/console/`, live API only, every figure from the backend): the screens
-in order are Plant (wiring diagram + 3D floor), Detect, Heats, Twin, Bill,
-Health, Plan, Brief, Act, Prove, Scale.
-
-`DEMO_MODE=true` enables `POST /demo/inject` and the console's "Try a fault"
-button; it rewrites the last N hours of SIMULATED data. Never enable on a real
-plant. URL options: `?static=1` (still rendering for screenshots),
-`?view=3d` (Plant opens on the 3D floor), `?lang=ta|hi` (Brief in Tamil/Hindi),
-`?trail=impact` (Prove opens with the number's provenance panel).
-
-Scenarios `NORMAL`, `IDLE_WASTE`, `HIGH_LOAD`, `PRODUCTION_SURGE` are
-implemented (others raise `NotImplementedError`, Phase 3+). Reference +
-scenario run, e.g. 7 NORMAL days then 24 h waste:
-`.venv\Scripts\python -m apps.simulator --normal-days 7 --scenario IDLE_WASTE --hours 24 --post`
-
-Phase-2 API: `POST /energy/baseline/fit`, `GET /energy/baseline`,
-`GET /energy/summary` (hourly intervals + per-machine window aggregates:
-Σactual, Σexpected, aggregate deviation %, window SEC + status,
-non-productive kWh), `POST /energy/anomalies/detect`,
-`GET /energy/anomalies`, `POST /energy/anomalies/{id}/acknowledge`;
-`GET /dashboard/summary` now includes SEC + open-alert count.
-
-## Tests (real Postgres test database, nothing silently skipped)
+Run the test suite against a real Postgres test database:
 
 ```powershell
 $env:TEST_DATABASE_URL = "postgresql+psycopg://joulemitra:joulemitra@localhost:5432/joulemitra_test"
 .venv\Scripts\python -m pytest -q
 ```
 
-## Docker (db + backend + dashboard, one shared Dockerfile)
+More commands (simulator, dashboard, Docker, API): [docs/DEVELOPMENT_NOTES.md](docs/DEVELOPMENT_NOTES.md).
 
-```powershell
-docker compose up -d --build
-curl http://localhost:8000/health/components
-curl http://localhost:8501/   # HTTP 200
+## Repository layout
+
+```text
+apps/backend      # FastAPI server: telemetry, baselines, alerts, scheduling, verification
+apps/console      # Web console served at /console/ (live API only)
+apps/dashboard    # Streamlit dashboard (API-only views)
+apps/simulator    # SimulatedFactory: physics engine producing SIMULATED telemetry
+services/         # Analytics services: energy, health, optimisation, verification
+edge/             # Raspberry Pi gateway: MQTT/Modbus adapters + SQLite store-and-forward
+database/         # Plain-SQL migrations and seeds
+scripts/          # Setup helpers and one-click end-to-end demo
+site/             # Static snapshot published to GitHub Pages
+docs/             # Architecture, data model, validation, deployment references
+tests/            # Unit, API and integration tests (real Postgres, nothing skipped)
 ```
 
-## Layout (Phase 1 files)
+## Documentation
 
-`apps/backend` (FastAPI), `apps/simulator` (NORMAL scenario engine),
-`apps/dashboard` (Streamlit, API-only), `services/ingestion` (validation),
-`database/migrations` + `database/seeds` (plain SQL), `scripts/setup` + `scripts/seed`,
-`data/schemas/telemetry.json`, `tests/{unit,api,integration}`.
+| Doc | What it covers |
+| --- | -------------- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layered modular-monolith design and repo layout |
+| [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Entity model, units, timestamps and source classes |
+| [docs/ML_MODELS.md](docs/ML_MODELS.md) | Model cards: baseline, machine health, RUL adapter, optimiser |
+| [docs/VALIDATION.md](docs/VALIDATION.md) | Validation results on simulated data plus real steel-plant meter data (UCI #851) |
+| [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md) | Every simulator constant, labelled SIMULATED/ASSUMPTION |
+| [docs/SIMULATION.md](docs/SIMULATION.md) | Scenario engine and the implemented waste scenarios |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Edge gateway: protocol adapters and store-and-forward buffer |
+| [docs/deployment/](docs/deployment/) | Reference plant wiring for a future install (docs only) |
+| [docs/DEVELOPMENT_NOTES.md](docs/DEVELOPMENT_NOTES.md) | Phase notes, API list and commands moved out of this README |
+
+## Scope and honesty
+
+- All plant data is simulated; every figure is labelled SIMULATED, DERIVED or PROJECTED.
+- Decision support only: it never switches a furnace, motor or safety system.
+- Physical hardware and ESP32/Raspberry Pi deployment are the next step (wiring docs ready).
+
+## Team Tap to Tap
+
+Chennai Institute of Technology, Department of ECE: Vishnu Vardhan K S (team lead), Varshini R, Yugawathi E, V Paresh Kumar.
+Schneider Electric Challenge 04: Smart Manufacturing.
