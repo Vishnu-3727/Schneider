@@ -1,0 +1,82 @@
+/* JouleMitra Console — design tokens (single source of truth).
+ * One bold dark look. Colour encodes provenance: molten = measured
+ * energy / waste, blueprint = projected plan, green = verified saving.
+ * Nothing else is coloured. Flat surfaces only: no gradients, glows,
+ * shadow stacks or glassmorphism. */
+:root {
+  --color-surround: oklch(11% 0.01 255);   /* letterbox around the stage */
+  --color-paper: oklch(16% 0.012 255);      /* dark canvas */
+  --color-sheet: oklch(21% 0.014 255);      /* hero + raised panels, flat */
+  --color-ink: oklch(95% 0.008 90);         /* primary text */
+  --color-ink-2: oklch(76% 0.012 255);      /* secondary */
+  --color-ink-3: oklch(64% 0.012 255);      /* quiet labels */
+  --color-rule: oklch(32% 0.015 255);       /* hairline borders */
+  --color-accent: oklch(72% 0.19 45);       /* molten: measured energy, waste */
+  --color-accent-soft: oklch(30% 0.07 45);
+  --color-accent-ink: oklch(84% 0.12 55);   /* molten text on dark soft wash */
+  --color-projected: oklch(74% 0.13 255);   /* blueprint: projected plans */
+  --color-projected-soft: oklch(28% 0.06 255);
+  --color-verified: oklch(76% 0.15 160);    /* verified savings only */
+  --color-verified-soft: oklch(28% 0.06 160);
+  --color-warn: oklch(68% 0.2 25);           /* critical */
+  --color-warn-soft: oklch(28% 0.07 25);
+  --color-melt-hot: oklch(90% 0.18 95);        /* molten cracks at their hottest */
+  --color-cover-shade: oklch(16% 0.012 255 / 0.88); /* flat semi-opaque panel behind cover text */
+  --bloom-accent: oklch(72% 0.19 45 / 0.14);
+  --bloom-verified: oklch(76% 0.15 160 / 0.12);
+  --bloom-projected: oklch(74% 0.13 255 / 0.12);
+
+  --font-display: "Big Shoulders Display", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Noto Sans Tamil", "Noto Sans Devanagari", system-ui, sans-serif;
+  --font-numerals: "Big Shoulders Display", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-sans: "IBM Plex Sans", "Noto Sans Tamil", "Noto Sans Devanagari", system-ui, sans-serif;
+
+  /* The stage is a fixed 1600x900 (16:9) canvas scaled to fit the window,
+   * so the browser and the PPT slide show the same composition. */
+  --stage-w: 1600px;
+  --stage-h: 900px;
+  --root-size: 16px;
+
+  --text-hero: 7rem;
+  --text-hero-s: 5rem;
+  --text-kpi: 3rem;
+  --text-kpi-s: 2.25rem;
+  --text-title: 2.75rem;
+  --text-lead: 1.3rem;
+  --text-body: 1rem;
+  --text-label: 0.8125rem;
+  --text-micro: 0.8rem;   /* floor for anything on screen; never set smaller */
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-9: 2.25rem;
+  --space-10: 2.5rem;
+  --space-11: 2.75rem;
+  --space-12: 3rem;
+
+  --radius-sheet: 0.5rem;
+  --radius-panel: 0.5rem;
+  --radius-hero: 0.5rem;   /* hero tile; supporting tiles share it */
+  --radius-pill: 999px;
+  --border-thin: 1px;
+  --ring-width: 2px;
+  --opacity-pressed: 0.75;
+  --rail-w: 0px;
+  --title-tracking: -0.015em;
+
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --anim-fade: fade 180ms var(--ease-out);
+  /* Motion durations: screen fade 200ms, screen enter 260ms,
+   * chart intro 280ms, hero count-up 600ms. */
+  --dur-quick: 200ms;
+  --dur-screen: 260ms;
+  --dur-chart: 280ms;
+  --dur-count: 600ms;
+}
